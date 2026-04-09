@@ -1,0 +1,10 @@
+{
+  "id": "obsidian-github-sync",
+  "name": "GitHub Sync",
+  "version": "1.0.0",
+  "minAppVersion": "1.0.0",
+  "description": "Auto-sync your Obsidian vault with a GitHub repository using REST API.",
+  "author": "Trae AI",
+  "authorUrl": "https://trae.ai",
+  "isDesktopOnly": false
+}
