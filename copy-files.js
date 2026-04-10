@@ -1,23 +1,23 @@
 import fs from 'fs';
 import path from 'path';
 
-const buildDir = path.join(process.cwd(), 'build');
+const pluginDir = path.join(process.cwd(), 'build', 'obsidian-github-sync');
 const filesToCopy = ['manifest.json', 'styles.css'];
 
-// 确保 build 目录存在
-if (!fs.existsSync(buildDir)) {
-  fs.mkdirSync(buildDir, { recursive: true });
-  console.log(`Created build directory: ${buildDir}`);
+// 确保插件目录存在
+if (!fs.existsSync(pluginDir)) {
+  fs.mkdirSync(pluginDir, { recursive: true });
+  console.log(`Created plugin directory: ${pluginDir}`);
 }
 
 // 复制文件
 filesToCopy.forEach(file => {
   const sourcePath = path.join(process.cwd(), file);
-  const destPath = path.join(buildDir, file);
+  const destPath = path.join(pluginDir, file);
   
   if (fs.existsSync(sourcePath)) {
     fs.copyFileSync(sourcePath, destPath);
-    console.log(`Copied: ${file} -> build/`);
+    console.log(`Copied: ${file} -> build/obsidian-github-sync/`);
   } else {
     console.warn(`Warning: File not found: ${file}`);
   }

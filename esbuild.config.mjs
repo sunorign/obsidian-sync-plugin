@@ -39,7 +39,7 @@ if (prod) {
 		logLevel: "info",
 		sourcemap: false,
 		treeShaking: true,
-		outfile: "build/main.js",
+		outfile: "build/obsidian-github-sync/main.js",
 	});
 	process.exit(0);
 } else {
