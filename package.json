@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "node esbuild.config.mjs",
-    "build": "tsc -noEmit && node esbuild.config.mjs production",
+    "build": "tsc -noEmit && node esbuild.config.mjs production && npm run copy-files",
+    "copy-files": "node copy-files.js",
     "lint": "eslint .",
     "check": "tsc -b --noEmit"
   },

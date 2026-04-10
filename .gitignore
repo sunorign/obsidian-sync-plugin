@@ -17,6 +17,7 @@ dist-ssr
 main.js
 main.css
 styles.css.map
+build/
 
 # Obsidian plugin specific
 .obsidian/
