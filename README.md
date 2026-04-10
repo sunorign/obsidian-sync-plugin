@@ -43,9 +43,72 @@ npm install
 # 构建插件
 npm run build
 
-# 将插件复制到 Obsidian Vault（替换为你的 Vault 路径）
-cp -r dist/<vault-path>/.obsidian/plugins/obsidian-github-sync/
+# 安装插件到 Obsidian Vault（替换为你的 Vault 路径）
+cp -r build/ <your-vault>/.obsidian/plugins/obsidian-github-sync/
 ```
+
+## 前置准备：获取 GitHub Personal Access Token
+
+### 什么是 GitHub Personal Access Token (PAT)
+
+GitHub Personal Access Token (PAT) 是 GitHub 提供的一种认证方式，用于代替密码进行 API 访问。本插件使用 PAT 来访问你的 GitHub 仓库，实现文件的读取和写入。
+
+### 如何获取 GitHub Personal Access Token
+
+#### 步骤 1：访问 GitHub 设置
+
+1. 登录你的 GitHub 账号
+2. 点击右上角的头像 → **Settings**（设置）
+3. 在左侧菜单中找到 → **Developer settings**（开发者设置）
+4. 点击 → **Personal access tokens**（个人访问令牌）
+5. 点击 → **Tokens (classic)**
+
+#### 步骤 2：创建新 Token
+
+1. 点击右上角的 **Generate new token**（生成新令牌）→ **Generate new token (classic)**
+2. 如果提示需要验证密码，请输入你的 GitHub 密码
+3. 在 **Note** 字段中填写一个描述，例如：`Obsidian GitHub Sync Plugin`
+4. 在 **Expiration**（过期时间）中选择一个合适的过期时间
+   - 推荐：选择 `90 days` 或 `365 days`
+   - 如果需要长期使用，可以选择 `No expiration`（不建议）
+5. 在 **Select scopes**（选择权限范围）中勾选：
+   - ✅ `repo`（授予对私有仓库的完整访问权限）
+   - 只需要勾选 `repo` 即可，其他权限不需要
+
+#### 步骤 3：生成并复制 Token
+
+1. 点击底部的 **Generate token**（生成令牌）按钮
+2. GitHub 会生成一个新的 Token
+3. **重要：** 立即复制这个 Token，保存到安全的地方
+   - GitHub 只显示一次 Token，关闭页面后就看不到了
+   - 如果丢失了，只能删除旧 Token 重新生成
+
+#### 步骤 4：使用 Token
+
+将复制的 Token 粘贴到 Obsidian 设置中的 GitHub Token 输入框，点击保存即可。
+
+### 推荐使用 Fine-grained PAT（更安全）
+
+GitHub 推荐使用 **Fine-grained PAT** 而不是 Classic PAT，它提供更精细的权限控制：
+
+1. 在 **Personal access tokens** 页面选择 **Fine-grained tokens**
+2. 点击 **Generate new token**
+3. 填写 Token 名称和过期时间
+4. 在 **Repository access** 中选择 → **Only select repositories**
+5. 选择你要用于同步笔记的仓库
+6. 在 **Permissions** → **Repository permissions** 中：
+   - **Contents** → 设置为 **Read and write**
+7. 点击 **Generate token**，复制 Token
+
+这种方式更安全，Token 只能访问你指定的仓库，不会影响你的其他仓库。
+
+### 权限要求
+
+无论使用哪种 Token，都需要确保：
+
+- 如果你的仓库是**私有**的：Token 需要有读取和写入权限
+- 如果你的仓库是**公开**的：Token 只需要读取权限（但推送还是需要写入权限）
+- 推荐授予 `contents:read & contents:write` 权限
 
 ## 使用说明
 
