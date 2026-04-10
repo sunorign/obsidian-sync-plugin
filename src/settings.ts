@@ -20,16 +20,22 @@ export class GitHubSyncSettingTab extends PluginSettingTab {
         new Setting(containerEl)
             .setName("GitHub Token")
             .setDesc("GitHub Personal Access Token (Fine-grained PAT recommended)")
-            .addText((text) =>
+            .addText(async (text) => {
+                const currentToken = await this.plugin.loadToken();
                 text
                     .setPlaceholder("github_pat_...")
-                    .setValue("")
+                    .setValue(currentToken || "")
                     .onChange(async (value) => {
                         if (value) {
                             await this.plugin.saveToken(value);
                             new Notice("Token saved securely");
                         }
-                    })
+                    });
+            })
+            .addButton((button) =>
+                button.setButtonText("Save Token").onClick(async () => {
+                    new Notice("Token saved");
+                })
             )
             .addButton((button) =>
                 button.setButtonText("Test Connection").onClick(async () => {
@@ -39,6 +45,14 @@ export class GitHubSyncSettingTab extends PluginSettingTab {
                     } catch (error: any) {
                         new Notice(`Connection failed: ${error.message}`);
                     }
+                })
+            )
+            .addButton((button) =>
+                button.setButtonText("Delete Token").onClick(async () => {
+                    await this.plugin.deleteToken();
+                    new Notice("Token deleted");
+                    // Refresh the display
+                    this.display();
                 })
             );
 
@@ -141,6 +155,36 @@ export class GitHubSyncSettingTab extends PluginSettingTab {
                         this.plugin.settings.syncMarkdownOnly = value;
                         await this.plugin.saveSettings();
                     })
+            );
+
+        new Setting(containerEl)
+            .setName("Auto Push Interval (minutes)")
+            .setDesc("Automatically push changes every X minutes (0 = disabled)")
+            .addText((text) =>
+                text
+                    .setPlaceholder("0")
+                    .setValue(this.plugin.settings.autoPushInterval.toString())
+                    .onChange(async (value) => {
+                        const interval = parseInt(value);
+                        this.plugin.settings.autoPushInterval = !isNaN(interval) && interval >= 0 ? interval : 0;
+                        await this.plugin.saveSettings();
+                        this.plugin.restartAutoPushTimer();
+                    })
+            );
+
+        new Setting(containerEl)
+            .setName("Manual Sync")
+            .setDesc("Push all dirty files to GitHub immediately")
+            .addButton((button) =>
+                button.setButtonText("Sync Now").onClick(async () => {
+                    try {
+                        new Notice("Starting sync...");
+                        await this.plugin.syncNow();
+                        new Notice("Sync completed!");
+                    } catch (error: any) {
+                        new Notice(`Sync failed: ${error.message}`);
+                    }
+                })
             );
     }
 }

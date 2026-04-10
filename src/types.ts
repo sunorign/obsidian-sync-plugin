@@ -6,6 +6,7 @@ export interface PluginSettings {
     vaultSubPath: string;
     autoPullOnStartup: boolean;
     autoPushOnShutdown: boolean;
+    autoPushInterval: number;  // Auto push interval in minutes (0 = disabled)
     syncMarkdownOnly: boolean;
     excludePatterns: string[];
     requestTimeoutMs: number;
@@ -19,6 +20,7 @@ export const DEFAULT_SETTINGS: PluginSettings = {
     vaultSubPath: "",
     autoPullOnStartup: true,
     autoPushOnShutdown: true,
+    autoPushInterval: 0,  // Disabled by default
     syncMarkdownOnly: true,
     excludePatterns: [
         ".obsidian/workspace.json",

@@ -20,6 +20,7 @@ export default class MyPlugin extends Plugin {
     conflictResolver!: ConflictResolver;
 
     private tokenKey = "github-token";
+    private autoPushTimer: number | null = null;
 
     async onload() {
         await this.loadSettings();
@@ -68,13 +69,64 @@ export default class MyPlugin extends Plugin {
         );
 
         this.logger.info("GitHub Sync plugin loaded");
+
+        // Start auto-push timer if enabled
+        this.startAutoPushTimer();
     }
 
     async onunload() {
+        // Stop auto-push timer
+        this.stopAutoPushTimer();
+
         if (this.settings.autoPushOnShutdown && this.syncManager) {
             await this.syncManager.pushOnShutdown();
         }
         this.logger.info("GitHub Sync plugin unloaded");
+    }
+
+    startAutoPushTimer() {
+        this.stopAutoPushTimer();
+        
+        if (this.settings.autoPushInterval <= 0 || !this.syncManager) {
+            return;
+        }
+
+        // Convert minutes to milliseconds
+        const intervalMs = this.settings.autoPushInterval * 60 * 1000;
+        
+        // @ts-ignore
+        this.autoPushTimer = window.setInterval(() => {
+            this.logger.info(`Auto-push triggered by interval (${this.settings.autoPushInterval} minutes)`);
+            this.syncManager?.pushOnShutdown();
+        }, intervalMs);
+
+        this.logger.info(`Auto-push timer started: every ${this.settings.autoPushInterval} minutes`);
+    }
+
+    stopAutoPushTimer() {
+        if (this.autoPushTimer !== null) {
+            // @ts-ignore
+            window.clearInterval(this.autoPushTimer);
+            this.autoPushTimer = null;
+            this.logger.info("Auto-push timer stopped");
+        }
+    }
+
+    restartAutoPushTimer() {
+        this.stopAutoPushTimer();
+        this.startAutoPushTimer();
+    }
+
+    async syncNow(): Promise<void> {
+        if (!this.syncManager) {
+            throw new Error("Sync manager not initialized");
+        }
+
+        if (!this.githubApi) {
+            throw new Error("GitHub API not initialized");
+        }
+
+        await this.syncManager.pushOnShutdown();
     }
 
     private initializeSync(token: string) {
@@ -90,6 +142,9 @@ export default class MyPlugin extends Plugin {
                 this.statusBar,
                 this.conflictResolver
             );
+
+            // Restart auto-push timer after reinitialization
+            this.restartAutoPushTimer();
         }
     }
 
@@ -112,13 +167,23 @@ export default class MyPlugin extends Plugin {
                 // @ts-ignore
                 await this.app.keychain.set(this.tokenKey, token);
             } else {
-                const path = `.obsidian/plugins/${this.manifest.id}/.token`;
-                await this.app.vault.adapter.write(path, token);
+                const dirPath = `.obsidian/plugins/${this.manifest.id}`;
+                const filePath = `${dirPath}/.token`;
+                // Ensure directory exists
+                if (!(await this.app.vault.adapter.exists(dirPath))) {
+                    await this.app.vault.adapter.mkdir(dirPath);
+                }
+                await this.app.vault.adapter.write(filePath, token);
             }
         } catch (e) {
-            console.error("Failed to save token", e);
-            const path = `.obsidian/plugins/${this.manifest.id}/.token`;
-            await this.app.vault.adapter.write(path, token);
+            console.error("Failed to save token to keychain, trying fallback", e);
+            const dirPath = `.obsidian/plugins/${this.manifest.id}`;
+            const filePath = `${dirPath}/.token`;
+            // Ensure directory exists
+            if (!(await this.app.vault.adapter.exists(dirPath))) {
+                await this.app.vault.adapter.mkdir(dirPath);
+            }
+            await this.app.vault.adapter.write(filePath, token);
         }
         
         this.initializeSync(token);
@@ -140,6 +205,30 @@ export default class MyPlugin extends Plugin {
             console.error("Failed to load token", e);
         }
         return null;
+    }
+
+    async deleteToken(): Promise<void> {
+        try {
+            // @ts-ignore
+            if (this.app.keychain) {
+                // @ts-ignore
+                await this.app.keychain.remove(this.tokenKey);
+            } else {
+                const path = `.obsidian/plugins/${this.manifest.id}/.token`;
+                if (await this.app.vault.adapter.exists(path)) {
+                    await this.app.vault.adapter.remove(path);
+                }
+            }
+        } catch (e) {
+            console.error("Failed to delete token", e);
+        }
+        
+        // Stop auto-push timer
+        this.stopAutoPushTimer();
+        
+        // Clear GitHub API client
+        this.githubApi = null;
+        this.syncManager = null;
     }
 
     initializeGitHubApi(token: string) {
