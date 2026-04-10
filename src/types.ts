@@ -8,6 +8,8 @@ export interface PluginSettings {
     autoPushOnShutdown: boolean;
     autoPushInterval: number;  // Auto push interval in minutes (0 = disabled)
     syncMarkdownOnly: boolean;
+    syncImages: boolean;       // Sync image files (.png, .jpg, .jpeg, .gif, .webp)
+    syncPDF: boolean;          // Sync PDF files
     excludePatterns: string[];
     requestTimeoutMs: number;
 }
@@ -22,6 +24,8 @@ export const DEFAULT_SETTINGS: PluginSettings = {
     autoPushOnShutdown: true,
     autoPushInterval: 0,  // Disabled by default
     syncMarkdownOnly: true,
+    syncImages: false,      // Disabled by default (increases sync time)
+    syncPDF: false,         // Disabled by default (increases sync time)
     excludePatterns: [
         ".obsidian/workspace.json",
         ".obsidian/cache",

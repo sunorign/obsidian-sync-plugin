@@ -158,6 +158,30 @@ export class GitHubSyncSettingTab extends PluginSettingTab {
             );
 
         new Setting(containerEl)
+            .setName("Sync Image Files")
+            .setDesc("Sync image files: .png, .jpg, .jpeg, .gif, .webp, .svg")
+            .addToggle((toggle) =>
+                toggle
+                    .setValue(this.plugin.settings.syncImages)
+                    .onChange(async (value) => {
+                        this.plugin.settings.syncImages = value;
+                        await this.plugin.saveSettings();
+                    })
+            );
+
+        new Setting(containerEl)
+            .setName("Sync PDF Files")
+            .setDesc("Sync PDF files (.pdf)")
+            .addToggle((toggle) =>
+                toggle
+                    .setValue(this.plugin.settings.syncPDF)
+                    .onChange(async (value) => {
+                        this.plugin.settings.syncPDF = value;
+                        await this.plugin.saveSettings();
+                    })
+            );
+
+        new Setting(containerEl)
             .setName("Auto Push Interval (minutes)")
             .setDesc("Automatically push changes every X minutes (0 = disabled)")
             .addText((text) =>
