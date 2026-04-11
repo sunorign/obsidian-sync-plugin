@@ -1,221 +1,153 @@
 # Obsidian GitHub Sync Plugin
 
-Obsidian GitHub Sync Plugin 是一个专为 Obsidian 用户设计的文件级同步工具，通过 GitHub REST API 实现 Vault 内容与 GitHub 仓库的自动同步。解决多设备间笔记同步问题，无需本地 Git 环境即可实现云端备份与协作。
+English | [简体中文](README.zh-CN.md)
 
-## 核心功能
+Obsidian GitHub Sync Plugin is a file-level sync tool for Obsidian. It syncs your vault content to a GitHub repository via the GitHub REST API, so you can back up and collaborate across devices without installing Git locally.
 
-### 自动同步
-- **启动自动拉取**：Obsidian 加载时自动从 GitHub 同步最新内容
-- **实时变更监听**：监听本地 Markdown 文件的创建和修改
-- **关闭自动推送**：Obsidian 关闭时自动将本地变更推送到 GitHub
+## Key Features
 
-### 安全配置
-- **Token 安全存储**：优先使用 Obsidian Secret Storage (Keychain)，提供本地加密隐藏文件降级方案
-- **仓库配置**：支持自定义仓库路径、分支和同步目录
-- **路径映射**：配置远端仓库路径与本地 Vault 子目录的映射关系
+### Automatic sync
+- **Auto pull on startup**: fetch latest content from GitHub when Obsidian loads
+- **Real-time change watching**: watch local file creations/updates
+- **Auto push on shutdown**: push local changes when Obsidian closes
+- **Scheduled auto push**: configurable interval (minutes), `0` to disable
+- **Sync now**: one-click/manual push of all pending changes
 
-### 冲突处理
-- **SHA 校验检测**：推送前检查远端是否已被修改
-- **冲突文件生成**：检测到冲突时自动生成 `.conflict.local.md` 和 `.conflict.remote.md` 副本
-- **用户提示**：通过 Notice 通知用户手动解决冲突
+### Secure configuration
+- **Safe token storage**: prefers Obsidian Secret Storage (Keychain); falls back to a local encrypted hidden file
+- **Repository options**: configurable owner/repo/branch, repo path, and local vault subpath mapping
 
-### 可视化监控
-- **状态栏显示**：实时展示同步状态（pulling/pushing/success/conflict/error）
-- **统一日志系统**：详细记录同步过程和错误信息
+### Conflict handling
+- **SHA-based detection**: checks remote changes before pushing
+- **Conflict artifacts**: generates `.conflict.local.md` and `.conflict.remote.md` copies when a conflict is detected
+- **User notification**: prompts via Obsidian Notice for manual resolution
 
-## 安装方法
+### Observability
+- **Status bar**: shows sync state (pulling/pushing/success/conflict/error)
+- **Unified logging**: detailed sync logs and error information
 
-### 手动安装
-1. 下载插件的发布版本
-2. 解压到 Obsidian Vault 的插件目录：`.obsidian/plugins/obsidian-github-sync/`
-3. 重新启动 Obsidian
-4. 在设置中启用插件
+### Attachment sync
+- **Supported attachments**: images (`.png`, `.jpg`, `.jpeg`, `.gif`, `.webp`, `.svg`) and PDFs (`.pdf`)
 
-### 从源码构建
+## Installation
+
+### Manual install
+1. Download a release build
+2. Unzip into your vault plugin directory: `.obsidian/plugins/obsidian-github-sync/`
+3. Restart Obsidian
+4. Enable the plugin in Settings
+
+### Build from source
 ```bash
-# 克隆仓库
 git clone <repository-url>
 cd obsidian-github-sync
 
-# 安装依赖
 npm install
-
-# 构建插件
 npm run build
+```
 
-# 安装插件到 Obsidian Vault（替换为你的 Vault 路径）
+Then copy the build output into your vault plugin directory:
+```bash
 cp -r build/ <your-vault>/.obsidian/plugins/obsidian-github-sync/
 ```
 
-## 前置准备：获取 GitHub Personal Access Token
+## Prerequisite: GitHub Personal Access Token (PAT)
 
-### 什么是 GitHub Personal Access Token (PAT)
+This plugin uses a GitHub Personal Access Token (PAT) to access your repository content via API.
 
-GitHub Personal Access Token (PAT) 是 GitHub 提供的一种认证方式，用于代替密码进行 API 访问。本插件使用 PAT 来访问你的 GitHub 仓库，实现文件的读取和写入。
+### Recommended: Fine-grained PAT (safer)
+Create a fine-grained token, grant access to only the target repository, and set:
+- **Repository permissions** → **Contents**: Read and write
 
-### 如何获取 GitHub Personal Access Token
+### Classic PAT
+If you use a classic token, grant:
+- `repo` scope
 
-#### 步骤 1：访问 GitHub 设置
+### Permission notes
+- Private repos need read + write permissions
+- Public repos still need write permissions to push
 
-1. 登录你的 GitHub 账号
-2. 点击右上角的头像 → **Settings**（设置）
-3. 在左侧菜单中找到 → **Developer settings**（开发者设置）
-4. 点击 → **Personal access tokens**（个人访问令牌）
-5. 点击 → **Tokens (classic)**
+## Usage
 
-#### 步骤 2：创建新 Token
+### 1. Configure the plugin
+In Obsidian Settings → this plugin:
+- **Owner**: GitHub username/org
+- **Repo**: repository name
+- **Branch**: default `main`
+- **Repo Path**: directory in the repo to sync (default root)
+- **Vault SubPath**: local vault subdirectory to sync (default root)
 
-1. 点击右上角的 **Generate new token**（生成新令牌）→ **Generate new token (classic)**
-2. 如果提示需要验证密码，请输入你的 GitHub 密码
-3. 在 **Note** 字段中填写一个描述，例如：`Obsidian GitHub Sync Plugin`
-4. 在 **Expiration**（过期时间）中选择一个合适的过期时间
-   - 推荐：选择 `90 days` 或 `365 days`
-   - 如果需要长期使用，可以选择 `No expiration`（不建议）
-5. 在 **Select scopes**（选择权限范围）中勾选：
-   - ✅ `repo`（授予对私有仓库的完整访问权限）
-   - 只需要勾选 `repo` 即可，其他权限不需要
+Paste your PAT, save, then use **Test Connection** to validate.
 
-#### 步骤 3：生成并复制 Token
+### 2. Manage your token
+- The plugin prefers Secret Storage for the token
+- If your token expires, delete it in settings and paste a new one
+- Use **Verify Token** to check validity
 
-1. 点击底部的 **Generate token**（生成令牌）按钮
-2. GitHub 会生成一个新的 Token
-3. **重要：** 立即复制这个 Token，保存到安全的地方
-   - GitHub 只显示一次 Token，关闭页面后就看不到了
-   - 如果丢失了，只能删除旧 Token 重新生成
+### 3. Sync workflow
+- Pull runs automatically on plugin load
+- Push runs on shutdown and/or on a schedule (if enabled)
+- Use **Sync Now** to push immediately
+- Use **View Logs** for detailed sync output
 
-#### 步骤 4：使用 Token
+## Architecture
 
-将复制的 Token 粘贴到 Obsidian 设置中的 GitHub Token 输入框，点击保存即可。
-
-### 推荐使用 Fine-grained PAT（更安全）
-
-GitHub 推荐使用 **Fine-grained PAT** 而不是 Classic PAT，它提供更精细的权限控制：
-
-1. 在 **Personal access tokens** 页面选择 **Fine-grained tokens**
-2. 点击 **Generate new token**
-3. 填写 Token 名称和过期时间
-4. 在 **Repository access** 中选择 → **Only select repositories**
-5. 选择你要用于同步笔记的仓库
-6. 在 **Permissions** → **Repository permissions** 中：
-   - **Contents** → 设置为 **Read and write**
-7. 点击 **Generate token**，复制 Token
-
-这种方式更安全，Token 只能访问你指定的仓库，不会影响你的其他仓库。
-
-### 权限要求
-
-无论使用哪种 Token，都需要确保：
-
-- 如果你的仓库是**私有**的：Token 需要有读取和写入权限
-- 如果你的仓库是**公开**的：Token 只需要读取权限（但推送还是需要写入权限）
-- 推荐授予 `contents:read & contents:write` 权限
-
-## 使用说明
-
-### 1. 配置插件
-1. 打开 Obsidian 设置
-2. 找到 "GitHub Sync" 插件
-3. 填写 GitHub 仓库信息：
-   - **Owner**：仓库所有者（用户名）
-   - **Repo**：仓库名称
-   - **Branch**：分支（默认 main）
-   - **Repo Path**：仓库内同步目录（默认根目录）
-4. 配置本地映射：
-   - **Vault SubPath**：Vault 中的同步子目录（默认根目录）
-5. 保存 GitHub Personal Access Token（PAT）
-6. 点击 "测试连接" 验证配置
-
-### 2. 管理 Token
-- 插件会优先使用 Obsidian Secret Storage（加密存储）
-- 如果 Token 无效或需要更新，点击 "删除 Token" 后重新输入
-- 可以在设置中点击 "验证 Token" 检查当前 Token 的有效性
-
-### 3. 同步操作
-- **启动拉取**：插件加载时自动执行
-- **手动同步**：目前需要通过重启插件或修改文件触发
-- **查看日志**：在设置中点击 "查看同步日志" 可以查看详细的同步记录
-
-## 技术架构
-
-### 核心模块
+### Core modules
 ```
 src/
-├── main.ts              # 插件入口与生命周期管理
-├── settings.ts          # 设置面板 UI 与配置持久化
-├── types.ts             # 全局类型定义与默认设置
-├── github-api.ts        # GitHub REST API 封装
-├── sync-manager.ts      # 同步流程控制核心
-├── conflict-resolver.ts # 冲突文件生成逻辑
-├── metadata-store.ts    # 文件 SHA 与同步元数据存储
-├── path-filter.ts       # 文件过滤与排除规则
-├── logger.ts            # 统一日志工具
-└── status-bar.ts        # 状态栏 UI 更新
+├── main.ts              # plugin entry and lifecycle
+├── settings.ts          # settings UI and persistence
+├── types.ts             # types and default settings
+├── github-api.ts        # GitHub REST API wrapper
+├── sync-manager.ts      # sync orchestration
+├── conflict-resolver.ts # conflict artifact generation
+├── metadata-store.ts    # SHA + sync metadata storage
+├── path-filter.ts       # file filtering and exclusions
+├── logger.ts            # unified logger
+└── status-bar.ts        # status bar updates
 ```
 
-### 技术栈
-- **TypeScript** 5.0+：类型安全的开发语言
-- **esbuild**：快速的构建工具
-- **@octokit/rest**：GitHub API 客户端
-- **Obsidian API**：与 Obsidian 平台集成
+## Development
 
-## 开发指南
-
-### 开发环境要求
+### Requirements
 - Node.js 16+
-- npm 或 yarn
+- npm or yarn
 - Obsidian v1.0+
 
-### 开发流程
-1. 安装依赖：`npm install`
-2. 开发模式：`npm run dev`（监听文件变化自动编译）
-3. 构建生产版本：`npm run build`
-4. 测试：`npm run test`
+### Scripts
+- Install: `npm install`
+- Dev: `npm run dev`
+- Build: `npm run build`
+- Test: `npm run test`
 
-### 调试
-- 在 Obsidian 中开启插件开发模式
-- 使用 `console.log()` 在浏览器开发者工具中查看输出
-- 查看同步日志：`.obsidian/plugins/obsidian-github-sync/logs/` 目录下的日志文件
+### Debugging
+- Enable Obsidian developer mode
+- Use the devtools console for logs
+- Sync logs are stored under `.obsidian/plugins/obsidian-github-sync/logs/`
 
-## 注意事项
+## Notes
 
-### 同步范围
-- 第一版只同步 `.md` 文件
-- 自动排除以下目录：
-  - `.obsidian/cache`
-  - `.obsidian/workspace.json`
-  - `.trash`
-  - 插件自身生成的临时文件
+### Exclusions
+The plugin excludes common non-content paths such as:
+- `.obsidian/cache`
+- `.obsidian/workspace.json`
+- `.trash`
+- plugin-generated temporary files
 
-### 冲突处理
-- 冲突检测基于文件内容的 SHA 校验
-- 冲突文件会保留在本地 Vault 中，需要手动合并
-- 建议使用 Obsidian 的内置 diff 查看器或第三方工具解决冲突
+### Reliability
+- `onunload()` is not a perfect “last chance” sync hook; consider using scheduled push
+- Network failures retry automatically (up to 3 times)
 
-### 可靠性
-- `onunload()` 不是绝对可靠的唯一同步点，建议定期手动触发同步
-- 网络异常时会自动重试，但最多 3 次
-- 同步过程中插件崩溃可通过重新加载插件恢复状态
+## Roadmap
+- Sync history
+- Delete/rename sync
+- Branch management
+- Bidirectional incremental sync improvements
 
-## 后续扩展
+## Feedback
 
-### 已实现功能 ✅
-1. ✅ **定时自动 push**：可配置自动推送间隔（分钟），0 表示禁用
-2. ✅ **手动"立即同步"命令**：在设置页面点击"Sync Now"按钮立即推送所有变更
-3. ⬜ 同步历史记录
-4. ✅ **支持附件同步**：支持图片文件（.png, .jpg, .jpeg, .gif, .webp, .svg）和 PDF 文件（.pdf）
-5. ⬜ 删除/重命名同步
-6. ⬜ 分支管理
-7. ✅ **改进冲突处理与 diff 支持**：冲突提示包含内部链接，可直接点击在 Obsidian 中打开对比
-8. ⬜ 双向增量同步优化
+Issues and pull requests are welcome.
 
-## 问题反馈
-
-如果遇到问题或有功能建议，欢迎在 GitHub 仓库中提交 Issue 或 Pull Request。
-
-## 许可证
+## License
 
 MIT License
-
----
-
-**提示**：这是一个开源插件，使用时请遵守 GitHub 的使用条款和 Obsidian 的插件开发规范。
