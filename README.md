@@ -139,10 +139,32 @@ The plugin excludes common non-content paths such as:
 - Network failures retry automatically (up to 3 times)
 
 ## Roadmap
-- Sync history
-- Delete/rename sync
-- Branch management
-- Bidirectional incremental sync improvements
+
+### Implemented ✅
+- ✅ Plugin skeleton: Basic plugin structure loads in Obsidian with status bar and settings tab
+- ✅ Settings + secret storage: Configurable repository info with secure token storage (Obsidian Keychain + fallback)
+- ✅ GitHub API wrapper: Complete implementation of list/get/create/update/delete via GitHub REST API
+- ✅ Auto pull on startup: Automatically sync remote content to local vault after plugin loads
+- ✅ Local file change watching: Tracks modified/created/deleted/renamed files
+- ✅ Auto push on shutdown: Pushes dirty files to GitHub when Obsidian closes
+- ✅ Delete/rename sync: Synchronize local file deletion and rename to keep remote consistent
+- ✅ Basic conflict handling: Generates `.conflict.local.md` and `.conflict.remote.md` with internal links for manual merging
+- ✅ Status bar display: Shows sync states (idle/pulling/pushing/success/conflict/error)
+- ✅ Unified logging: Structured logging for troubleshooting
+- ✅ Sync history: Detailed history log of all sync operations for troubleshooting and change tracking
+- ✅ Branch management: List branches, switch current branch, create new branch from existing
+- ✅ Bidirectional incremental sync optimization: Only pulls changed files from remote, automatically cleans up local files removed from remote
+- ✅ First sync progress indicator: Shows progress notice when pulling many files
+- ✅ More granular exclusion rules: Support glob pattern matching for flexible file exclusion, editable in settings
+- ✅ Sync summary panel: Dashboard showing sync status, last sync time, and pending changes
+- ✅ Built-in graphical diff conflict resolution: Provides side-by-side graphical comparison, directly choose to keep local or remote version to resolve conflict
+- ✅ Scheduled auto push: Configurable interval in minutes, `0` to disable
+- ✅ Manual "Sync Now": One-click push all pending changes in settings page
+- ✅ Attachment sync: Support image files (`.png`, `.jpg`, `.jpeg`, `.gif`, `.webp`, `.svg`) and PDF files (`.pdf`)
+- ✅ Improved conflict handling with diff support: Conflict notice contains internal links for direct opening in Obsidian for comparison
+
+### Todo ⬜
+- No pending features - all planned features are implemented! 🎉
 
 ## Feedback
 

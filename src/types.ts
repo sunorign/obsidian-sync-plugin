@@ -12,6 +12,19 @@ export interface PluginSettings {
     syncPDF: boolean;          // Sync PDF files
     excludePatterns: string[];
     requestTimeoutMs: number;
+    enableSyncHistory: boolean;    // Enable sync history logging
+    maxSyncHistoryEntries: number; // Maximum number of history entries to keep
+}
+
+export interface BranchInfo {
+    name: string;
+    isDefault: boolean;
+    protected: boolean;
+}
+
+export interface CreateBranchInput {
+    branchName: string;
+    baseBranch: string;
 }
 
 export const DEFAULT_SETTINGS: PluginSettings = {
@@ -31,7 +44,9 @@ export const DEFAULT_SETTINGS: PluginSettings = {
         ".obsidian/cache",
         ".trash"
     ],
-    requestTimeoutMs: 15000
+    requestTimeoutMs: 15000,
+    enableSyncHistory: true,     // Enabled by default
+    maxSyncHistoryEntries: 100  // Keep last 100 entries
 };
 
 export interface SyncMetadata {
@@ -59,6 +74,12 @@ export interface UpsertFileInput {
     sha?: string;
 }
 
+export interface DeleteFileInput {
+    path: string;
+    message: string;
+    sha: string;
+}
+
 export type SyncStatus =
     | "idle"
     | "pulling"
@@ -73,4 +94,21 @@ export interface GitHubConfig {
     branch: string;
     token: string;
     timeout: number;
+}
+
+export type SyncOperationType = 'pull' | 'push' | 'manual-push' | 'auto-push' | 'delete' | 'rename';
+
+export interface SyncHistoryEntry {
+    id: string;
+    timestamp: number;
+    operationType: SyncOperationType;
+    filePath?: string;
+    status: 'success' | 'conflict' | 'error';
+    message: string;
+    error?: string;
+}
+
+export interface SyncHistory {
+    entries: SyncHistoryEntry[];
+    maxEntries: number;
 }

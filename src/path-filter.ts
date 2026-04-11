@@ -1,4 +1,5 @@
 import { PluginSettings } from "./types";
+import { minimatch } from "minimatch";
 
 // Supported attachment extensions
 const IMAGE_EXTENSIONS = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg'];
@@ -34,16 +35,16 @@ export class PathFilter {
             return false;
         }
 
-        // 3. Exclusion patterns
-        for (const pattern of this.settings.excludePatterns) {
-            if (path.includes(pattern)) {
-                return false;
-            }
-        }
-
-        // 4. Skip internal files
+        // 3. Skip internal .obsidian folder by default
         if (path.startsWith('.obsidian/')) {
             return false;
+        }
+
+        // 4. Check exclusion patterns with glob matching
+        for (const pattern of this.settings.excludePatterns) {
+            if (minimatch(path, pattern, { dot: true }) || path.includes(pattern)) {
+                return false;
+            }
         }
 
         return true;

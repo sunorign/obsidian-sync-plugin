@@ -1,9 +1,10 @@
-import { Plugin, Notice, TAbstractFile, TFile } from "obsidian";
+import { Plugin, Notice, TAbstractFile, TFile, Modal, App } from "obsidian";
 import { GitHubSyncSettingTab } from "./settings";
-import { PluginSettings, DEFAULT_SETTINGS, GitHubConfig } from "./types";
+import { PluginSettings, DEFAULT_SETTINGS, GitHubConfig, SyncHistoryEntry } from "./types";
 import { GitHubApiClient } from "./github-api";
 import { SyncManager } from "./sync-manager";
 import { MetadataStore } from "./metadata-store";
+import { HistoryStore } from "./history-store";
 import { PathFilter } from "./path-filter";
 import { Logger } from "./logger";
 import { StatusBar } from "./status-bar";
@@ -14,7 +15,8 @@ export default class MyPlugin extends Plugin {
     githubApi: GitHubApiClient | null = null;
     syncManager: SyncManager | null = null;
     metadataStore!: MetadataStore;
-    pathFilter!: PathFilter;
+    historyStore!: HistoryStore;
+    public pathFilter!: PathFilter;
     logger!: Logger;
     statusBar!: StatusBar;
     conflictResolver!: ConflictResolver;
@@ -29,10 +31,13 @@ export default class MyPlugin extends Plugin {
         this.logger = new Logger();
         this.statusBar = new StatusBar(this.addStatusBarItem());
         this.metadataStore = new MetadataStore(this);
+        this.historyStore = new HistoryStore(this);
         this.pathFilter = new PathFilter(this.settings);
         this.conflictResolver = new ConflictResolver(this.app, this.logger);
 
         await this.metadataStore.load();
+        await this.historyStore.load();
+        this.historyStore.setMaxEntries(this.settings.maxSyncHistoryEntries);
 
         // Add settings tab
         this.addSettingTab(new GitHubSyncSettingTab(this.app, this));
@@ -64,6 +69,22 @@ export default class MyPlugin extends Plugin {
             this.app.vault.on("create", (file: TAbstractFile) => {
                 if (file instanceof TFile) {
                     this.syncManager?.markDirty(file.path);
+                }
+            })
+        );
+
+        this.registerEvent(
+            this.app.vault.on("delete", (file: TAbstractFile) => {
+                if (file instanceof TFile && this.syncManager) {
+                    this.syncManager.handleLocalDelete(file.path);
+                }
+            })
+        );
+
+        this.registerEvent(
+            this.app.vault.on("rename", (file: TAbstractFile, oldPath: string) => {
+                if (file instanceof TFile && this.syncManager) {
+                    this.syncManager.handleRename(oldPath, file.path);
                 }
             })
         );
@@ -137,6 +158,7 @@ export default class MyPlugin extends Plugin {
                 this.githubApi,
                 this.settings,
                 this.metadataStore,
+                this.historyStore,
                 this.pathFilter,
                 this.logger,
                 this.statusBar,
@@ -250,5 +272,170 @@ export default class MyPlugin extends Plugin {
         if (!this.githubApi) throw new Error("Failed to initialize GitHub API");
         
         await this.githubApi.validateAccess();
+    }
+
+    async listBranches() {
+        if (!this.githubApi) throw new Error("GitHub API not initialized");
+        return await this.githubApi.listBranches();
+    }
+
+    async createBranch(branchName: string) {
+        if (!this.githubApi) throw new Error("GitHub API not initialized");
+        await this.githubApi.createBranch({
+            branchName,
+            baseBranch: this.settings.branch
+        });
+    }
+
+    showSyncHistory(): void {
+        new SyncHistoryModal(this.app, this.historyStore).open();
+    }
+
+    clearSyncHistory(): void {
+        this.historyStore.clearHistory();
+        new Notice("Sync history cleared");
+    }
+
+    showSyncSummary(): void {
+        new SyncSummaryModal(this.app, this).open();
+    }
+}
+
+class SyncSummaryModal extends Modal {
+    private plugin: MyPlugin;
+
+    constructor(app: App, plugin: MyPlugin) {
+        super(app);
+        this.plugin = plugin;
+    }
+
+    onOpen() {
+        const { contentEl } = this;
+        contentEl.empty();
+
+        contentEl.createEl("h2", { text: "Sync Summary" });
+
+        const syncManager = this.plugin.syncManager;
+        const metadataStore = this.plugin.metadataStore;
+
+        const summaryContainer = contentEl.createEl("div", { cls: "sync-summary" });
+        summaryContainer.style.display = "grid";
+        summaryContainer.style.gap = "16px";
+
+        const currentBranch = this.plugin.settings.branch;
+        this.addSummaryRow(summaryContainer, "Current Branch", currentBranch);
+
+        const lastSyncAt = metadataStore.getLastSyncAt();
+        if (lastSyncAt) {
+            this.addSummaryRow(summaryContainer, "Last Sync", new Date(lastSyncAt).toLocaleString());
+        } else {
+            this.addSummaryRow(summaryContainer, "Last Sync", "Never synced");
+        }
+
+        const dirtyCount = syncManager ? syncManager.getDirtyFileCount() : 0;
+        this.addSummaryRow(summaryContainer, "Pending Changes", `${dirtyCount} file${dirtyCount !== 1 ? 's' : ''} waiting to be pushed`);
+
+        if (dirtyCount > 0 && syncManager) {
+            const dirtyFiles = syncManager.getDirtyFiles();
+            if (dirtyFiles.length > 0) {
+                const filesContainer = summaryContainer.createEl("div");
+                filesContainer.createEl("h4", { text: "Pending Files:" });
+                const list = filesContainer.createEl("ul");
+                list.style.paddingLeft = "20px";
+                dirtyFiles.forEach(path => {
+                    list.createEl("li", { text: path });
+                });
+            }
+        }
+
+        const trackedFiles = metadataStore.getAllShaEntries().length;
+        this.addSummaryRow(summaryContainer, "Tracked Files", `${trackedFiles} files`);
+    }
+
+    private addSummaryRow(container: HTMLElement, label: string, value: string) {
+        const row = container.createEl("div");
+        row.style.display = "flex";
+        row.style.justifyContent = "space-between";
+        row.style.borderBottom = "1px solid var(--background-modifier-border)";
+        row.style.paddingBottom = "8px";
+
+        const labelEl = row.createEl("span", { text: label + ":" });
+        labelEl.style.fontWeight = "bold";
+        const valueEl = row.createEl("span", { text: value });
+    }
+
+    onClose() {
+        const { contentEl } = this;
+        contentEl.empty();
+    }
+}
+
+class SyncHistoryModal extends Modal {
+    private historyStore: HistoryStore;
+
+    constructor(app: App, historyStore: HistoryStore) {
+        super(app);
+        this.historyStore = historyStore;
+    }
+
+    onOpen() {
+        const { contentEl } = this;
+        contentEl.empty();
+
+        contentEl.createEl("h2", { text: "Sync History" });
+
+        const entries = this.historyStore.getEntries();
+        if (entries.length === 0) {
+            contentEl.createEl("p", { text: "No sync history entries yet." });
+            return;
+        }
+
+        const table = contentEl.createEl("table", { cls: "sync-history-table" });
+        table.style.width = "100%";
+        table.style.borderCollapse = "collapse";
+
+        const thead = table.createEl("thead");
+        const headerRow = thead.createEl("tr");
+        ["Time", "Operation", "File", "Status", "Message"].forEach(text => {
+            const th = headerRow.createEl("th");
+            th.textContent = text;
+            th.style.borderBottom = "1px solid var(--background-modifier-border)";
+            th.style.padding = "8px";
+            th.style.textAlign = "left";
+        });
+
+        const tbody = table.createEl("tbody");
+        entries.forEach(entry => {
+            const row = tbody.createEl("tr");
+            row.style.borderBottom = "1px solid var(--background-modifier-border)";
+
+            const timeCell = row.createEl("td");
+            timeCell.style.padding = "8px";
+            timeCell.textContent = new Date(entry.timestamp).toLocaleString();
+
+            const opCell = row.createEl("td");
+            opCell.style.padding = "8px";
+            opCell.textContent = entry.operationType;
+
+            const fileCell = row.createEl("td");
+            fileCell.style.padding = "8px";
+            fileCell.textContent = entry.filePath || "-";
+
+            const statusCell = row.createEl("td");
+            statusCell.style.padding = "8px";
+            statusCell.textContent = entry.status;
+            statusCell.style.color = entry.status === 'success' ? 'var(--text-success)' : 
+                                     entry.status === 'conflict' ? 'var(--text-warning)' : 
+                                     'var(--text-error)';
+
+            const msgCell = row.createEl("td");
+            msgCell.style.padding = "8px";
+            msgCell.textContent = entry.message;
+        });
+    }
+
+    onClose() {
+        const { contentEl } = this;
+        contentEl.empty();
     }
 }

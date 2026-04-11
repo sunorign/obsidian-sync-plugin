@@ -53,4 +53,8 @@ export class MetadataStore {
     getLastSyncAt(): number | undefined {
         return this.metadata.lastSyncAt;
     }
+
+    getAllShaEntries(): Array<[string, string]> {
+        return Object.entries(this.metadata.remoteShaByPath);
+    }
 }

@@ -1,5 +1,5 @@
 import { Octokit } from "@octokit/rest";
-import { GitHubConfig, RemoteFileMeta, RemoteFileContent, UpsertFileInput } from "./types";
+import { GitHubConfig, RemoteFileMeta, RemoteFileContent, UpsertFileInput, DeleteFileInput, BranchInfo, CreateBranchInput } from "./types";
 
 export class GitHubApiClient {
     private octokit: Octokit;
@@ -88,6 +88,21 @@ export class GitHubApiClient {
         }
     }
 
+    async deleteFile(input: DeleteFileInput): Promise<void> {
+        try {
+            await this.octokit.repos.deleteFile({
+                owner: this.config.owner,
+                repo: this.config.repo,
+                path: input.path,
+                message: input.message,
+                sha: input.sha,
+                branch: this.config.branch,
+            });
+        } catch (error: any) {
+            throw new Error(`Failed to delete file ${input.path}: ${error.message}`);
+        }
+    }
+
     async getFileSha(path: string): Promise<string | null> {
         try {
             const response = await this.octokit.repos.getContent({
@@ -105,5 +120,84 @@ export class GitHubApiClient {
             if (error.status === 404) return null;
             throw new Error(`Failed to get SHA for ${path}: ${error.message}`);
         }
+    }
+
+    async listBranches(): Promise<BranchInfo[]> {
+        try {
+            const response = await this.octokit.repos.listBranches({
+                owner: this.config.owner,
+                repo: this.config.repo,
+                per_page: 100,
+            });
+
+            const repoInfo = await this.octokit.repos.get({
+                owner: this.config.owner,
+                repo: this.config.repo,
+            });
+
+            const defaultBranch = repoInfo.data.default_branch;
+
+            return response.data.map(branch => ({
+                name: branch.name,
+                isDefault: branch.name === defaultBranch,
+                protected: branch.protected,
+            }));
+        } catch (error: any) {
+            throw new Error(`Failed to list branches: ${error.message}`);
+        }
+    }
+
+    async createBranch(input: CreateBranchInput): Promise<void> {
+        try {
+            const baseSha = await this.getBranchSha(input.baseBranch);
+            if (!baseSha) {
+                throw new Error(`Base branch ${input.baseBranch} not found`);
+            }
+
+            await this.octokit.git.createRef({
+                owner: this.config.owner,
+                repo: this.config.repo,
+                ref: `refs/heads/${input.branchName}`,
+                sha: baseSha,
+            });
+        } catch (error: any) {
+            throw new Error(`Failed to create branch ${input.branchName}: ${error.message}`);
+        }
+    }
+
+    async getBranchSha(branchName: string): Promise<string | null> {
+        try {
+            const response = await this.octokit.repos.getBranch({
+                owner: this.config.owner,
+                repo: this.config.repo,
+                branch: branchName,
+            });
+            return response.data.commit.sha;
+        } catch (error: any) {
+            if (error.status === 404) return null;
+            throw new Error(`Failed to get branch SHA for ${branchName}: ${error.message}`);
+        }
+    }
+
+    async doesBranchExist(branchName: string): Promise<boolean> {
+        try {
+            await this.octokit.repos.getBranch({
+                owner: this.config.owner,
+                repo: this.config.repo,
+                branch: branchName,
+            });
+            return true;
+        } catch (error: any) {
+            if (error.status === 404) return false;
+            throw new Error(`Failed to check branch existence ${branchName}: ${error.message}`);
+        }
+    }
+
+    updateCurrentBranch(branch: string): void {
+        this.config.branch = branch;
+    }
+
+    getCurrentBranch(): string {
+        return this.config.branch;
     }
 }
