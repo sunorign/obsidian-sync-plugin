@@ -200,7 +200,7 @@ export class GitHubSyncSettingTab extends PluginSettingTab {
 
         new Setting(containerEl)
             .setName("Manual Sync")
-            .setDesc("Push all dirty files to GitHub immediately")
+            .setDesc("Pull remote changes first, then push local changes if no conflicts are found")
             .addButton((button) =>
                 button.setButtonText("Sync Now").onClick(async () => {
                     try {

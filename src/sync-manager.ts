@@ -20,6 +20,8 @@ export class SyncManager {
     private conflictResolver: ConflictResolver;
 
     private dirtyFiles: Set<string> = new Set();
+    private conflictedFiles: Set<string> = new Set();
+    private failedFiles: Set<string> = new Set();
     private isPulling = false;
     private isPushing = false;
     private internalWritePaths: Set<string> = new Set();
@@ -47,10 +49,38 @@ export class SyncManager {
     }
 
     async pullOnStartup(): Promise<void> {
-        if (this.isPulling) return;
+        await this.pullRemoteChanges("initial pull");
+    }
+
+    async syncNow(): Promise<void> {
+        const pullResult = await this.pullRemoteChanges("manual sync");
+
+        if (pullResult.conflictCount > 0) {
+            new Notice(`GitHub Sync: ${pullResult.conflictCount} conflict(s) found during pull. Resolve them before pushing.`);
+            return;
+        }
+
+        if (pullResult.errorCount > 0) {
+            new Notice(`GitHub Sync: Pull finished with ${pullResult.errorCount} error(s). Push skipped.`);
+            return;
+        }
+
+        await this.pushOnShutdown();
+    }
+
+    private async pullRemoteChanges(trigger: "initial pull" | "manual sync"): Promise<{
+        successCount: number;
+        conflictCount: number;
+        errorCount: number;
+        deletedCount: number;
+    }> {
+        if (this.isPulling) {
+            this.logger.warn(`Skipped ${trigger} because another pull is already running`);
+            return { successCount: 0, conflictCount: 0, errorCount: 0, deletedCount: 0 };
+        }
         this.isPulling = true;
         this.statusBar.setStatus("pulling");
-        this.logger.info("Starting initial pull...");
+        this.logger.info(`Starting ${trigger}...`);
 
         let successCount = 0;
         let conflictCount = 0;
@@ -84,30 +114,33 @@ export class SyncManager {
 
             this.metadataStore.updateLastSyncTime();
             await this.metadataStore.save();
-            this.statusBar.setStatus("success");
-            this.logger.info(`Initial pull completed: ${successCount} updated, ${deletedCount} deleted (remote removed), ${conflictCount} conflicts, ${errorCount} errors`);
+            this.statusBar.setStatus(conflictCount > 0 ? "conflict" : errorCount > 0 ? "error" : "success");
+            this.logger.info(`${trigger} completed: ${successCount} updated, ${deletedCount} deleted (remote removed), ${conflictCount} conflicts, ${errorCount} errors`);
 
             if (this.settings.enableSyncHistory) {
                 this.historyStore.addEntry(
                     'pull',
                     errorCount > 0 ? (conflictCount > 0 ? 'conflict' : 'error') : 'success',
-                    `Pull completed: ${successCount} files updated, ${deletedCount} deleted (remote removed), ${conflictCount} conflicts, ${errorCount} errors`
+                    `${trigger} completed: ${successCount} files updated, ${deletedCount} deleted (remote removed), ${conflictCount} conflicts, ${errorCount} errors`
                 );
             }
+
+            return { successCount, conflictCount, errorCount, deletedCount };
         } catch (error: any) {
             this.statusBar.setStatus("error");
-            this.logger.error("Failed during initial pull", error);
+            this.logger.error(`Failed during ${trigger}`, error);
             new Notice(`GitHub Sync: Pull failed - ${error.message}`);
 
             if (this.settings.enableSyncHistory) {
                 this.historyStore.addEntry(
                     'pull',
                     'error',
-                    `Pull failed: ${error.message}`,
+                    `${trigger} failed: ${error.message}`,
                     undefined,
                     error.message
                 );
             }
+            throw error;
         } finally {
             this.isPulling = false;
         }
@@ -136,12 +169,15 @@ export class SyncManager {
                 } else {
                     this.logger.warn(`Conflict detected for ${localPath}`);
                     const localContent = await this.app.vault.read(localFile);
-                    const remoteContentStr = atob(remoteContent.contentBase64.replace(/\s/g, ""));
+                    const remoteContentStr = this.base64ToUtf8String(remoteContent.contentBase64);
                     await this.conflictResolver.resolvePullConflict({
                         path: localPath,
                         localContent: localContent,
-                        remoteContent: remoteContentStr
+                        remoteContent: remoteContentStr,
+                        baseContent: this.metadataStore.getBaseText(remoteFile.path)
                     });
+                    this.conflictedFiles.add(localPath);
+                    this.failedFiles.delete(localPath);
                     this.statusBar.setStatus("conflict");
 
                     if (this.settings.enableSyncHistory) {
@@ -158,8 +194,15 @@ export class SyncManager {
             }
 
             this.metadataStore.updateSha(remoteFile.path, remoteFile.sha);
+            if (localPath.endsWith(".md")) {
+                const baseText = this.base64ToUtf8String(remoteContent.contentBase64);
+                this.metadataStore.updateBaseText(remoteFile.path, baseText);
+            }
+            this.conflictedFiles.delete(localPath);
+            this.failedFiles.delete(localPath);
             return 'success';
         } catch (error: any) {
+            this.failedFiles.add(localPath);
             this.logger.error(`Failed to pull file ${remoteFile.path}`, error);
             if (this.settings.enableSyncHistory) {
                 this.historyStore.addEntry(
@@ -185,26 +228,39 @@ export class SyncManager {
         let successCount = 0;
         let conflictCount = 0;
         let errorCount = 0;
+        const successfullyPushedFiles: string[] = [];
 
         try {
             for (const localPath of Array.from(this.dirtyFiles)) {
                 const result = await this.pushFile(localPath);
-                if (result === 'success') successCount++;
-                else if (result === 'conflict') conflictCount++;
-                else if (result === 'error') errorCount++;
+                if (result === 'success') {
+                    successCount++;
+                    successfullyPushedFiles.push(localPath);
+                } else if (result === 'conflict') {
+                    conflictCount++;
+                } else if (result === 'error') {
+                    errorCount++;
+                }
             }
 
-            this.dirtyFiles.clear();
+            for (const localPath of successfullyPushedFiles) {
+                this.dirtyFiles.delete(localPath);
+            }
+
             await this.metadataStore.save();
-            this.statusBar.setStatus("success");
-            this.logger.info(`Push completed: ${successCount} pushed, ${conflictCount} conflicts, ${errorCount} errors`);
+            this.statusBar.setStatus(conflictCount > 0 ? "conflict" : errorCount > 0 ? "error" : "success");
+            this.logger.info(`Push completed: ${successCount} pushed, ${conflictCount} conflicts, ${errorCount} errors, ${this.dirtyFiles.size} pending`);
 
             if (this.settings.enableSyncHistory) {
                 this.historyStore.addEntry(
                     operationType,
                     errorCount > 0 ? (conflictCount > 0 ? 'conflict' : 'error') : 'success',
-                    `Push completed: ${successCount} files pushed, ${conflictCount} conflicts, ${errorCount} errors`
+                    `Push completed: ${successCount} files pushed, ${conflictCount} conflicts, ${errorCount} errors, ${this.dirtyFiles.size} still pending`
                 );
+            }
+
+            if (conflictCount > 0 || errorCount > 0) {
+                new Notice(`GitHub Sync: ${successCount} pushed, ${this.dirtyFiles.size} file(s) still pending`);
             }
         } catch (error: any) {
             this.statusBar.setStatus("error");
@@ -250,13 +306,20 @@ export class SyncManager {
                 
                 const localContent = await this.app.vault.read(localFile);
                 const remoteFile = await this.githubApi.getFile(remotePath);
-                const remoteContent = atob(remoteFile.contentBase64.replace(/\s/g, ""));
+                const remoteContent = this.base64ToUtf8String(remoteFile.contentBase64);
                 
                 await this.conflictResolver.resolvePushConflict({
                     path: localPath,
                     localContent: localContent,
-                    remoteContent: remoteContent
+                    remoteContent: remoteContent,
+                    baseContent: this.metadataStore.getBaseText(remotePath)
                 });
+                this.metadataStore.updateSha(remotePath, currentRemoteSha);
+                if (localPath.endsWith(".md")) {
+                    this.metadataStore.updateBaseText(remotePath, remoteContent);
+                }
+                this.conflictedFiles.add(localPath);
+                this.failedFiles.delete(localPath);
 
                 if (this.settings.enableSyncHistory) {
                     this.historyStore.addEntry(
@@ -280,6 +343,12 @@ export class SyncManager {
             if (newSha) {
                 this.metadataStore.updateSha(remotePath, newSha);
             }
+            if (localPath.endsWith(".md")) {
+                const latestText = await this.app.vault.read(localFile);
+                this.metadataStore.updateBaseText(remotePath, latestText);
+            }
+            this.conflictedFiles.delete(localPath);
+            this.failedFiles.delete(localPath);
 
             if (this.settings.enableSyncHistory) {
                 this.historyStore.addEntry(
@@ -291,6 +360,7 @@ export class SyncManager {
             }
             return 'success';
         } catch (error: any) {
+            this.failedFiles.add(localPath);
             this.logger.error(`Failed to push file ${localPath}`, error);
             if (this.settings.enableSyncHistory) {
                 this.historyStore.addEntry(
@@ -358,6 +428,8 @@ export class SyncManager {
         if (this.internalWritePaths.has(path)) return;
         if (this.pathFilter.shouldSync(path)) {
             this.dirtyFiles.add(path);
+            this.conflictedFiles.delete(path);
+            this.failedFiles.delete(path);
             this.logger.debug(`Marked ${path} as dirty`);
         }
     }
@@ -370,6 +442,14 @@ export class SyncManager {
         return Array.from(this.dirtyFiles);
     }
 
+    getConflictedFiles(): string[] {
+        return Array.from(this.conflictedFiles);
+    }
+
+    getFailedFiles(): string[] {
+        return Array.from(this.failedFiles);
+    }
+
     async handleLocalDelete(localPath: string): Promise<void> {
         if (!this.pathFilter.shouldSync(localPath)) {
             return;
@@ -377,6 +457,8 @@ export class SyncManager {
 
         this.logger.info(`Handling local deletion: ${localPath}`);
         this.dirtyFiles.delete(localPath);
+        this.conflictedFiles.delete(localPath);
+        this.failedFiles.delete(localPath);
         await this.deleteFile(localPath);
     }
 
@@ -388,6 +470,8 @@ export class SyncManager {
         this.logger.info(`Handling rename: ${oldLocalPath} -> ${newLocalPath}`);
 
         this.dirtyFiles.delete(oldLocalPath);
+        this.conflictedFiles.delete(oldLocalPath);
+        this.failedFiles.delete(oldLocalPath);
 
         if (this.pathFilter.shouldSync(newLocalPath)) {
             this.dirtyFiles.add(newLocalPath);
@@ -517,5 +601,10 @@ export class SyncManager {
             bytes[i] = binaryString.charCodeAt(i);
         }
         return bytes.buffer;
+    }
+
+    private base64ToUtf8String(base64: string): string {
+        const buffer = this.base64ToArrayBuffer(base64);
+        return new TextDecoder("utf-8").decode(new Uint8Array(buffer));
     }
 }

@@ -51,6 +51,7 @@ export const DEFAULT_SETTINGS: PluginSettings = {
 
 export interface SyncMetadata {
     remoteShaByPath: Record<string, string>;
+    baseTextByPath?: Record<string, string>;
     lastSyncAt?: number;
 }
 

@@ -1,175 +1,165 @@
 # Obsidian GitHub Sync Plugin
 
-English | [简体中文](README.zh-CN.md)
+[简体中文](README.zh-CN.md)
 
-Obsidian GitHub Sync Plugin is a file-level sync tool for Obsidian. It syncs your vault content to a GitHub repository via the GitHub REST API, so you can back up and collaborate across devices without installing Git locally.
+Obsidian GitHub Sync Plugin syncs files in your Obsidian vault to a GitHub repository through the GitHub REST API. It is designed for users who want cross-device backup and collaboration without installing Git locally.
 
-## Key Features
+## Features
 
-### Automatic sync
-- **Auto pull on startup**: fetch latest content from GitHub when Obsidian loads
-- **Real-time change watching**: watch local file creations/updates
-- **Auto push on shutdown**: push local changes when Obsidian closes
-- **Scheduled auto push**: configurable interval (minutes), `0` to disable
-- **Sync now**: one-click/manual push of all pending changes
+### Sync workflow
+- Auto pull on startup
+- Real-time local file watching
+- Auto push on shutdown
+- Scheduled auto push with configurable interval
+- `Sync Now` performs a bidirectional sync:
+  pull remote changes first, then push local changes if no conflicts or pull errors are found
 
-### Secure configuration
-- **Safe token storage**: prefers Obsidian Secret Storage (Keychain); falls back to a local encrypted hidden file
-- **Repository options**: configurable owner/repo/branch, repo path, and local vault subpath mapping
+### Repository sync
+- Sync Markdown files by default
+- Optional image sync: `.png`, `.jpg`, `.jpeg`, `.gif`, `.webp`, `.svg`
+- Optional PDF sync: `.pdf`
+- Supports repo subpath and vault subpath mapping
+- Pull now uses full repository tree traversal, so nested folders are included
 
 ### Conflict handling
-- **SHA-based detection**: checks remote changes before pushing
-- **Conflict artifacts**: generates `.conflict.local.md` and `.conflict.remote.md` copies when a conflict is detected
-- **User notification**: prompts via Obsidian Notice for manual resolution
+- SHA-based remote change detection before push
+- Local conflict artifacts: `.conflict.local.md` and `.conflict.remote.md`
+- Full-screen compare view for conflict resolution
+- Block-level merge workflow:
+  choose local or remote per conflict block, then save merged content
+- Supports hiding unchanged blocks to focus on diffs
+- Conflict artifacts are cleaned up automatically after resolution
 
 ### Observability
-- **Status bar**: shows sync state (pulling/pushing/success/conflict/error)
-- **Unified logging**: detailed sync logs and error information
+- Status bar sync state
+- Sync history viewer
+- Sync summary panel with categorized pending state:
+  pending push files, conflicts to resolve, recently failed files
 
-### Attachment sync
-- **Supported attachments**: images (`.png`, `.jpg`, `.jpeg`, `.gif`, `.webp`, `.svg`) and PDFs (`.pdf`)
+### Security
+- Token prefers Obsidian Secret Storage
+- Falls back to a local plugin file when keychain is unavailable
 
 ## Installation
 
 ### Manual install
-1. Download a release build
-2. Unzip into your vault plugin directory: `.obsidian/plugins/obsidian-github-sync/`
-3. Restart Obsidian
-4. Enable the plugin in Settings
+1. Download a release build.
+2. Extract it into your vault plugin directory:
+   `.obsidian/plugins/obsidian-github-sync/`
+3. Restart Obsidian.
+4. Enable the plugin in Settings.
 
 ### Build from source
 ```bash
 git clone <repository-url>
 cd obsidian-github-sync
-
 npm install
 npm run build
 ```
 
-Then copy the build output into your vault plugin directory:
+Build output is generated in:
+`build/obsidian-github-sync/`
+
+Copy that folder into your vault:
 ```bash
-cp -r build/ <your-vault>/.obsidian/plugins/obsidian-github-sync/
+cp -r build/obsidian-github-sync <your-vault>/.obsidian/plugins/
 ```
 
-## Prerequisite: GitHub Personal Access Token (PAT)
+## GitHub token
 
-This plugin uses a GitHub Personal Access Token (PAT) to access your repository content via API.
+This plugin requires a GitHub Personal Access Token.
 
-### Recommended: Fine-grained PAT (safer)
-Create a fine-grained token, grant access to only the target repository, and set:
-- **Repository permissions** → **Contents**: Read and write
+### Recommended
+Use a fine-grained PAT and grant:
+- Repository access: only the target repository
+- Repository permissions:
+  `Contents: Read and write`
 
 ### Classic PAT
 If you use a classic token, grant:
-- `repo` scope
-
-### Permission notes
-- Private repos need read + write permissions
-- Public repos still need write permissions to push
+- `repo`
 
 ## Usage
 
 ### 1. Configure the plugin
-In Obsidian Settings → this plugin:
-- **Owner**: GitHub username/org
-- **Repo**: repository name
-- **Branch**: default `main`
-- **Repo Path**: directory in the repo to sync (default root)
-- **Vault SubPath**: local vault subdirectory to sync (default root)
+In Obsidian Settings -> this plugin:
+- `Owner`: GitHub user or organization
+- `Repo`: repository name
+- `Branch`: default `main`
+- `Repo Path`: subdirectory in the repository, empty means repo root
+- `Vault SubPath`: subdirectory in the vault, empty means vault root
 
-Paste your PAT, save, then use **Test Connection** to validate.
+Paste the token, save it, then use `Test Connection`.
 
-### 2. Manage your token
-- The plugin prefers Secret Storage for the token
-- If your token expires, delete it in settings and paste a new one
-- Use **Verify Token** to check validity
+### 2. Sync behavior
+- Startup pull downloads remote changes into the vault
+- Shutdown push uploads local changes
+- Scheduled push uploads dirty files at the configured interval
+- `Sync Now`:
+  1. pulls remote changes
+  2. stops if pull conflicts are found
+  3. stops if pull errors occur
+  4. pushes remaining local changes only when pull is clean
 
-### 3. Sync workflow
-- Pull runs automatically on plugin load
-- Push runs on shutdown and/or on a schedule (if enabled)
-- Use **Sync Now** to push immediately
-- Use **View Logs** for detailed sync output
+### 3. Conflict workflow
+- When a push or pull conflict is detected, the plugin opens the compare view
+- For each conflict block, choose `Use Local` or `Use Remote`
+- Click `Save Merged` to write the merged result back to the original file
+- The next sync should continue from the updated local merged content
+
+### 4. Diagnostics
+- `View Summary` shows tracked files, pending push files, conflicts, and recent failures
+- `View History` shows the recent sync log with operation type and error details
 
 ## Architecture
 
-### Core modules
-```
+Core modules:
+
+```text
 src/
-├── main.ts              # plugin entry and lifecycle
-├── settings.ts          # settings UI and persistence
-├── types.ts             # types and default settings
-├── github-api.ts        # GitHub REST API wrapper
-├── sync-manager.ts      # sync orchestration
-├── conflict-resolver.ts # conflict artifact generation
-├── metadata-store.ts    # SHA + sync metadata storage
-├── path-filter.ts       # file filtering and exclusions
-├── logger.ts            # unified logger
-└── status-bar.ts        # status bar updates
+├─ main.ts              Plugin entry and lifecycle
+├─ settings.ts          Settings UI
+├─ types.ts             Shared types and defaults
+├─ github-api.ts        GitHub API wrapper
+├─ sync-manager.ts      Pull/push orchestration
+├─ conflict-resolver.ts Conflict compare and merge UI
+├─ metadata-store.ts    SHA and base snapshot storage
+├─ history-store.ts     Sync history storage
+├─ path-filter.ts       File inclusion and exclusion logic
+├─ status-bar.ts        Status bar updates
+└─ logger.ts            Logging
 ```
 
-## Development
+## Recent changes
 
-### Requirements
-- Node.js 16+
-- npm or yarn
-- Obsidian v1.0+
-
-### Scripts
-- Install: `npm install`
-- Dev: `npm run dev`
-- Build: `npm run build`
-- Test: `npm run test`
-
-### Debugging
-- Enable Obsidian developer mode
-- Use the devtools console for logs
-- Sync logs are stored under `.obsidian/plugins/obsidian-github-sync/logs/`
+The current codebase includes the following newer behavior:
+- `Sync Now` is now bidirectional instead of push-only
+- Remote pull covers nested folders correctly
+- Partial push failures no longer clear all dirty files
+- Conflict compare view supports block-level merge
+- Compare view can hide unchanged blocks
+- Sync summary distinguishes pending, conflicted, and failed files
+- Sync history modal is wider and easier to read
 
 ## Notes
 
-### Exclusions
-The plugin excludes common non-content paths such as:
-- `.obsidian/cache`
-- `.obsidian/workspace.json`
-- `.trash`
-- plugin-generated temporary files
+- `onunload()` is not a guaranteed last-chance sync hook. Scheduled push is still recommended.
+- `Test Connection` only validates repository access. A successful test does not guarantee pull or push logic is error-free for every file state.
+- Current conflict UI is based on two-way diff plus saved base snapshots. Three-way conflict classification is planned but not fully implemented yet.
 
-### Reliability
-- `onunload()` is not a perfect “last chance” sync hook; consider using scheduled push
-- Network failures retry automatically (up to 3 times)
+## Development
 
-## Roadmap
+Requirements:
+- Node.js 16+
+- npm
+- Obsidian v1.0+
 
-### Implemented ✅
-- ✅ Plugin skeleton: Basic plugin structure loads in Obsidian with status bar and settings tab
-- ✅ Settings + secret storage: Configurable repository info with secure token storage (Obsidian Keychain + fallback)
-- ✅ GitHub API wrapper: Complete implementation of list/get/create/update/delete via GitHub REST API
-- ✅ Auto pull on startup: Automatically sync remote content to local vault after plugin loads
-- ✅ Local file change watching: Tracks modified/created/deleted/renamed files
-- ✅ Auto push on shutdown: Pushes dirty files to GitHub when Obsidian closes
-- ✅ Delete/rename sync: Synchronize local file deletion and rename to keep remote consistent
-- ✅ Basic conflict handling: Generates `.conflict.local.md` and `.conflict.remote.md` with internal links for manual merging
-- ✅ Status bar display: Shows sync states (idle/pulling/pushing/success/conflict/error)
-- ✅ Unified logging: Structured logging for troubleshooting
-- ✅ Sync history: Detailed history log of all sync operations for troubleshooting and change tracking
-- ✅ Branch management: List branches, switch current branch, create new branch from existing
-- ✅ Bidirectional incremental sync optimization: Only pulls changed files from remote, automatically cleans up local files removed from remote
-- ✅ First sync progress indicator: Shows progress notice when pulling many files
-- ✅ More granular exclusion rules: Support glob pattern matching for flexible file exclusion, editable in settings
-- ✅ Sync summary panel: Dashboard showing sync status, last sync time, and pending changes
-- ✅ Built-in graphical diff conflict resolution: Provides side-by-side graphical comparison, directly choose to keep local or remote version to resolve conflict
-- ✅ Scheduled auto push: Configurable interval in minutes, `0` to disable
-- ✅ Manual "Sync Now": One-click push all pending changes in settings page
-- ✅ Attachment sync: Support image files (`.png`, `.jpg`, `.jpeg`, `.gif`, `.webp`, `.svg`) and PDF files (`.pdf`)
-- ✅ Improved conflict handling with diff support: Conflict notice contains internal links for direct opening in Obsidian for comparison
-
-### Todo ⬜
-- No pending features - all planned features are implemented! 🎉
-
-## Feedback
-
-Issues and pull requests are welcome.
+Scripts:
+- `npm run dev`
+- `npm run build`
+- `npm run lint`
+- `npm run check`
 
 ## License
 
-MIT License
+MIT

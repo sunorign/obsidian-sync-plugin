@@ -147,7 +147,7 @@ export default class MyPlugin extends Plugin {
             throw new Error("GitHub API not initialized");
         }
 
-        await this.syncManager.pushOnShutdown();
+        await this.syncManager.syncNow();
     }
 
     private initializeSync(token: string) {
@@ -335,17 +335,16 @@ class SyncSummaryModal extends Modal {
         const dirtyCount = syncManager ? syncManager.getDirtyFileCount() : 0;
         this.addSummaryRow(summaryContainer, "Pending Changes", `${dirtyCount} file${dirtyCount !== 1 ? 's' : ''} waiting to be pushed`);
 
-        if (dirtyCount > 0 && syncManager) {
-            const dirtyFiles = syncManager.getDirtyFiles();
-            if (dirtyFiles.length > 0) {
-                const filesContainer = summaryContainer.createEl("div");
-                filesContainer.createEl("h4", { text: "Pending Files:" });
-                const list = filesContainer.createEl("ul");
-                list.style.paddingLeft = "20px";
-                dirtyFiles.forEach(path => {
-                    list.createEl("li", { text: path });
-                });
-            }
+        const conflictedFiles = syncManager ? syncManager.getConflictedFiles() : [];
+        const failedFiles = syncManager ? syncManager.getFailedFiles() : [];
+
+        this.addSummaryRow(summaryContainer, "Conflicts Pending", `${conflictedFiles.length} file${conflictedFiles.length !== 1 ? 's' : ''}`);
+        this.addSummaryRow(summaryContainer, "Recent Failures", `${failedFiles.length} file${failedFiles.length !== 1 ? 's' : ''}`);
+
+        if (syncManager) {
+            this.addFileSection(summaryContainer, "Pending Push Files", syncManager.getDirtyFiles());
+            this.addFileSection(summaryContainer, "Conflicts To Resolve", conflictedFiles);
+            this.addFileSection(summaryContainer, "Recently Failed Files", failedFiles);
         }
 
         const trackedFiles = metadataStore.getAllShaEntries().length;
@@ -362,6 +361,21 @@ class SyncSummaryModal extends Modal {
         const labelEl = row.createEl("span", { text: label + ":" });
         labelEl.style.fontWeight = "bold";
         const valueEl = row.createEl("span", { text: value });
+    }
+
+    private addFileSection(container: HTMLElement, title: string, paths: string[]) {
+        if (paths.length === 0) {
+            return;
+        }
+
+        const filesContainer = container.createEl("div");
+        filesContainer.createEl("h4", { text: `${title}:` });
+        const list = filesContainer.createEl("ul");
+        list.style.paddingLeft = "20px";
+
+        paths.forEach(path => {
+            list.createEl("li", { text: path });
+        });
     }
 
     onClose() {
@@ -381,6 +395,12 @@ class SyncHistoryModal extends Modal {
     onOpen() {
         const { contentEl } = this;
         contentEl.empty();
+        this.modalEl.style.width = "min(92vw, 1400px)";
+        this.modalEl.style.maxWidth = "min(92vw, 1400px)";
+        this.modalEl.style.height = "min(85vh, 900px)";
+        this.contentEl.style.height = "100%";
+        this.contentEl.style.display = "flex";
+        this.contentEl.style.flexDirection = "column";
 
         contentEl.createEl("h2", { text: "Sync History" });
 
@@ -390,9 +410,15 @@ class SyncHistoryModal extends Modal {
             return;
         }
 
-        const table = contentEl.createEl("table", { cls: "sync-history-table" });
+        const tableWrap = contentEl.createEl("div");
+        tableWrap.style.flex = "1";
+        tableWrap.style.overflow = "auto";
+        tableWrap.style.marginTop = "8px";
+
+        const table = tableWrap.createEl("table", { cls: "sync-history-table" });
         table.style.width = "100%";
         table.style.borderCollapse = "collapse";
+        table.style.tableLayout = "fixed";
 
         const thead = table.createEl("thead");
         const headerRow = thead.createEl("tr");
@@ -403,6 +429,11 @@ class SyncHistoryModal extends Modal {
             th.style.padding = "8px";
             th.style.textAlign = "left";
         });
+        const headerCells = headerRow.querySelectorAll("th");
+        if (headerCells[0]) (headerCells[0] as HTMLElement).style.width = "170px";
+        if (headerCells[1]) (headerCells[1] as HTMLElement).style.width = "110px";
+        if (headerCells[2]) (headerCells[2] as HTMLElement).style.width = "32%";
+        if (headerCells[3]) (headerCells[3] as HTMLElement).style.width = "90px";
 
         const tbody = table.createEl("tbody");
         entries.forEach(entry => {
@@ -420,6 +451,7 @@ class SyncHistoryModal extends Modal {
             const fileCell = row.createEl("td");
             fileCell.style.padding = "8px";
             fileCell.textContent = entry.filePath || "-";
+            fileCell.style.wordBreak = "break-word";
 
             const statusCell = row.createEl("td");
             statusCell.style.padding = "8px";
@@ -431,11 +463,14 @@ class SyncHistoryModal extends Modal {
             const msgCell = row.createEl("td");
             msgCell.style.padding = "8px";
             msgCell.textContent = entry.message;
+            msgCell.style.wordBreak = "break-word";
         });
     }
 
     onClose() {
         const { contentEl } = this;
         contentEl.empty();
+        this.modalEl.removeAttribute("style");
+        this.contentEl.removeAttribute("style");
     }
 }

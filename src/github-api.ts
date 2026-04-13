@@ -27,27 +27,52 @@ export class GitHubApiClient {
     }
 
     async listFiles(path: string): Promise<RemoteFileMeta[]> {
+        const normalizedPath = path.replace(/^\/+|\/+$/g, "");
+
         try {
-            const response = await this.octokit.repos.getContent({
+            const rootTreeSha = await this.getRootTreeSha();
+            const response = await this.octokit.git.getTree({
                 owner: this.config.owner,
                 repo: this.config.repo,
-                path: path,
-                ref: this.config.branch,
+                tree_sha: rootTreeSha,
+                recursive: "true",
             });
 
-            if (Array.isArray(response.data)) {
-                return response.data.map((item: any) => ({
+            const prefix = normalizedPath ? `${normalizedPath}/` : "";
+
+            return response.data.tree
+                .filter((item): item is typeof item & { path: string; sha: string; type: "blob" } =>
+                    item.type === "blob" &&
+                    typeof item.path === "string" &&
+                    typeof item.sha === "string" &&
+                    (normalizedPath === "" || item.path === normalizedPath || item.path.startsWith(prefix))
+                )
+                .map(item => ({
                     path: item.path,
                     sha: item.sha,
-                    size: item.size,
-                    type: item.type as "file" | "dir",
+                    size: item.size ?? 0,
+                    type: "file" as const,
                 }));
-            }
-            return [];
         } catch (error: any) {
             if (error.status === 404) return [];
-            throw new Error(`Failed to list files at ${path}: ${error.message}`);
+            throw new Error(`Failed to list files at ${normalizedPath}: ${error.message}`);
         }
+    }
+
+    private async getRootTreeSha(): Promise<string> {
+        const branch = await this.octokit.repos.getBranch({
+            owner: this.config.owner,
+            repo: this.config.repo,
+            branch: this.config.branch,
+        });
+
+        const commit = await this.octokit.git.getCommit({
+            owner: this.config.owner,
+            repo: this.config.repo,
+            commit_sha: branch.data.commit.sha,
+        });
+
+        return commit.data.tree.sha;
     }
 
     async getFile(path: string): Promise<RemoteFileContent> {

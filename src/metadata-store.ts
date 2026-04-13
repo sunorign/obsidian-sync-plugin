@@ -9,7 +9,7 @@ export class MetadataStore {
     constructor(plugin: Plugin) {
         this.plugin = plugin;
         this.metadataPath = `.obsidian/plugins/${plugin.manifest.id}/metadata.json`;
-        this.metadata = { remoteShaByPath: {} };
+        this.metadata = { remoteShaByPath: {}, baseTextByPath: {} };
     }
 
     async load(): Promise<void> {
@@ -17,6 +17,7 @@ export class MetadataStore {
             if (await this.plugin.app.vault.adapter.exists(this.metadataPath)) {
                 const content = await this.plugin.app.vault.adapter.read(this.metadataPath);
                 this.metadata = JSON.parse(content);
+                this.metadata.baseTextByPath = this.metadata.baseTextByPath || {};
             }
         } catch (error) {
             console.error("Failed to load metadata", error);
@@ -44,6 +45,20 @@ export class MetadataStore {
 
     removeSha(path: string) {
         delete this.metadata.remoteShaByPath[path];
+        if (this.metadata.baseTextByPath) {
+            delete this.metadata.baseTextByPath[path];
+        }
+    }
+
+    getBaseText(path: string): string | undefined {
+        return this.metadata.baseTextByPath?.[path];
+    }
+
+    updateBaseText(path: string, text: string) {
+        if (!this.metadata.baseTextByPath) {
+            this.metadata.baseTextByPath = {};
+        }
+        this.metadata.baseTextByPath[path] = text;
     }
 
     updateLastSyncTime() {
