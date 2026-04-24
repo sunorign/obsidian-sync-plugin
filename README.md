@@ -2,50 +2,47 @@
 
 [简体中文](README.zh-CN.md)
 
-Obsidian GitHub Sync Plugin syncs files in your Obsidian vault to a GitHub repository through the GitHub REST API. It is designed for users who want cross-device backup and collaboration without installing Git locally.
+Sync files from your Obsidian vault to GitHub through the GitHub REST API. The plugin is designed for backup and lightweight collaboration without requiring Git on every device.
 
 ## Features
 
-### Sync workflow
+### Core sync actions
+- `Sync Now`: two-way sync that pulls first, then pushes only when pull finishes without conflicts
+- `Mirror Local To GitHub`: local-first mirror that uploads local files, deletes remote leftovers, and preserves empty folders with placeholders
 - Auto pull on startup
 - Real-time local file watching
 - Auto push on shutdown
 - Scheduled auto push with configurable interval
-- `Sync Now` performs a bidirectional sync:
-  pull remote changes first, then push local changes if no conflicts or pull errors are found
 
-### Repository sync
-- Sync Markdown files by default
+### Sync scope
+- Markdown sync by default
 - Optional image sync: `.png`, `.jpg`, `.jpeg`, `.gif`, `.webp`, `.svg`
 - Optional PDF sync: `.pdf`
-- Supports repo subpath and vault subpath mapping
-- Pull now uses full repository tree traversal, so nested folders are included
+- Repo subpath and vault subpath mapping
+- Recursive remote tree pull, so nested directories are included
 
 ### Conflict handling
 - SHA-based remote change detection before push
-- Local conflict artifacts: `.conflict.local.md` and `.conflict.remote.md`
-- Full-screen compare view for conflict resolution
-- Block-level merge workflow:
-  choose local or remote per conflict block, then save merged content
-- Supports hiding unchanged blocks to focus on diffs
-- Conflict artifacts are cleaned up automatically after resolution
+- Full-screen compare view
+- Block-level merge workflow with `Use Local`, `Use Remote`, and `Save Merged`
+- Optional unchanged-block folding
+- Conflict artifacts are cleaned automatically after resolution
 
-### Observability
+### Diagnostics
 - Status bar sync state
+- Sync summary panel
 - Sync history viewer
-- Sync summary panel with categorized pending state:
-  pending push files, conflicts to resolve, recently failed files
+- Pending-state breakdown: pending push, conflicts, recent failures
 
-### Security
-- Token prefers Obsidian Secret Storage
-- Falls back to a local plugin file when keychain is unavailable
+### Language and settings
+- Built-in language switch: `简体中文 / English`
+- Simplified settings layout with `Core` and `Advanced` sections
 
 ## Installation
 
 ### Manual install
 1. Download a release build.
-2. Extract it into your vault plugin directory:
-   `.obsidian/plugins/obsidian-github-sync/`
+2. Extract it to `.obsidian/plugins/obsidian-github-sync/` inside your vault.
 3. Restart Obsidian.
 4. Enable the plugin in Settings.
 
@@ -57,95 +54,87 @@ npm install
 npm run build
 ```
 
-Build output is generated in:
-`build/obsidian-github-sync/`
+Build output:
 
-Copy that folder into your vault:
-```bash
-cp -r build/obsidian-github-sync <your-vault>/.obsidian/plugins/
+```text
+build/obsidian-github-sync/
 ```
 
 ## GitHub token
 
-This plugin requires a GitHub Personal Access Token.
+Use a GitHub Personal Access Token.
 
-### Recommended
-Use a fine-grained PAT and grant:
-- Repository access: only the target repository
-- Repository permissions:
-  `Contents: Read and write`
+Recommended permissions:
+- Repository access: target repository only
+- Repository permissions: `Contents: Read and write`
 
-### Classic PAT
-If you use a classic token, grant:
+If you use a classic PAT, grant:
 - `repo`
 
 ## Usage
 
 ### 1. Configure the plugin
-In Obsidian Settings -> this plugin:
-- `Owner`: GitHub user or organization
-- `Repo`: repository name
-- `Branch`: default `main`
-- `Repo Path`: subdirectory in the repository, empty means repo root
-- `Vault SubPath`: subdirectory in the vault, empty means vault root
+In Obsidian Settings for this plugin, fill in:
+- `GitHub Token`
+- `Owner`
+- `Repo`
+- `Branch`
+- `Remote Path`
+- `Local Path`
 
-Paste the token, save it, then use `Test Connection`.
+Then click `Test Connection`.
 
-### 2. Sync behavior
-- Startup pull downloads remote changes into the vault
-- Shutdown push uploads local changes
-- Scheduled push uploads dirty files at the configured interval
-- `Sync Now`:
-  1. pulls remote changes
-  2. stops if pull conflicts are found
-  3. stops if pull errors occur
-  4. pushes remaining local changes only when pull is clean
+### 2. Pick the right sync action
+- Use `Sync Now` when both local and remote may contain new changes you want to preserve.
+- Use `Mirror Local To GitHub` when local is the source of truth and GitHub must become identical to local.
 
-### 3. Conflict workflow
-- When a push or pull conflict is detected, the plugin opens the compare view
-- For each conflict block, choose `Use Local` or `Use Remote`
-- Click `Save Merged` to write the merged result back to the original file
-- The next sync should continue from the updated local merged content
+### 3. Empty folder behavior
+GitHub does not store empty directories natively. The plugin preserves them by writing a placeholder file:
 
-### 4. Diagnostics
-- `View Summary` shows tracked files, pending push files, conflicts, and recent failures
-- `View History` shows the recent sync log with operation type and error details
+```text
+.obsidian-github-sync.keep
+```
+
+During pull, the plugin recreates the local folder structure and hides the placeholder from normal sync scope.
+
+### 4. Conflict workflow
+- When a pull or push conflict is detected, the compare view opens.
+- Review each conflict block.
+- Choose `Use Local` or `Use Remote` per block, or accept one side entirely.
+- Click `Save Merged` to write the merged content back to the original file.
+
+### 5. Advanced tools
+The `Advanced` section includes:
+- Image and PDF sync toggles
+- Markdown-only mode
+- Exclusion patterns
+- Branch management
+- Sync summary
+- Sync history
 
 ## Architecture
 
-Core modules:
-
 ```text
 src/
-├─ main.ts              Plugin entry and lifecycle
-├─ settings.ts          Settings UI
-├─ types.ts             Shared types and defaults
-├─ github-api.ts        GitHub API wrapper
-├─ sync-manager.ts      Pull/push orchestration
-├─ conflict-resolver.ts Conflict compare and merge UI
-├─ metadata-store.ts    SHA and base snapshot storage
-├─ history-store.ts     Sync history storage
-├─ path-filter.ts       File inclusion and exclusion logic
-├─ status-bar.ts        Status bar updates
-└─ logger.ts            Logging
+├── main.ts              Plugin entry and lifecycle
+├── settings.ts          Settings UI
+├── i18n.ts              Language strings
+├── types.ts             Shared types and defaults
+├── github-api.ts        GitHub API wrapper
+├── sync-manager.ts      Pull/push/mirror orchestration
+├── conflict-resolver.ts Conflict compare and merge UI
+├── metadata-store.ts    SHA and base snapshot storage
+├── history-store.ts     Sync history storage
+├── path-filter.ts       File inclusion and exclusion logic
+├── status-bar.ts        Status bar updates
+└── logger.ts            Logging
 ```
-
-## Recent changes
-
-The current codebase includes the following newer behavior:
-- `Sync Now` is now bidirectional instead of push-only
-- Remote pull covers nested folders correctly
-- Partial push failures no longer clear all dirty files
-- Conflict compare view supports block-level merge
-- Compare view can hide unchanged blocks
-- Sync summary distinguishes pending, conflicted, and failed files
-- Sync history modal is wider and easier to read
 
 ## Notes
 
-- `onunload()` is not a guaranteed last-chance sync hook. Scheduled push is still recommended.
-- `Test Connection` only validates repository access. A successful test does not guarantee pull or push logic is error-free for every file state.
-- Current conflict UI is based on two-way diff plus saved base snapshots. Three-way conflict classification is planned but not fully implemented yet.
+- `Test Connection` only verifies repository access.
+- The current conflict UI is still based on two-way diff plus saved base snapshots.
+- Three-way conflict classification is planned, but not fully implemented yet.
 
 ## Development
 

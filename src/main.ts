@@ -9,6 +9,7 @@ import { PathFilter } from "./path-filter";
 import { Logger } from "./logger";
 import { StatusBar } from "./status-bar";
 import { ConflictResolver } from "./conflict-resolver";
+import { t } from "./i18n";
 
 export default class MyPlugin extends Plugin {
     settings!: PluginSettings;
@@ -29,11 +30,11 @@ export default class MyPlugin extends Plugin {
 
         // Initialize core components
         this.logger = new Logger();
-        this.statusBar = new StatusBar(this.addStatusBarItem());
+        this.statusBar = new StatusBar(this.addStatusBarItem(), this.settings);
         this.metadataStore = new MetadataStore(this);
         this.historyStore = new HistoryStore(this);
         this.pathFilter = new PathFilter(this.settings);
-        this.conflictResolver = new ConflictResolver(this.app, this.logger);
+        this.conflictResolver = new ConflictResolver(this.app, this.logger, this.settings);
 
         await this.metadataStore.load();
         await this.historyStore.load();
@@ -100,7 +101,7 @@ export default class MyPlugin extends Plugin {
         this.stopAutoPushTimer();
 
         if (this.settings.autoPushOnShutdown && this.syncManager) {
-            await this.syncManager.pushOnShutdown();
+            await this.syncManager.pushOnShutdown(true);
         }
         this.logger.info("GitHub Sync plugin unloaded");
     }
@@ -118,7 +119,7 @@ export default class MyPlugin extends Plugin {
         // @ts-ignore
         this.autoPushTimer = window.setInterval(() => {
             this.logger.info(`Auto-push triggered by interval (${this.settings.autoPushInterval} minutes)`);
-            this.syncManager?.pushOnShutdown();
+            this.syncManager?.pushOnShutdown(true);
         }, intervalMs);
 
         this.logger.info(`Auto-push timer started: every ${this.settings.autoPushInterval} minutes`);
@@ -138,6 +139,10 @@ export default class MyPlugin extends Plugin {
         this.startAutoPushTimer();
     }
 
+    t(key: Parameters<typeof t>[1], vars?: Record<string, string | number>): string {
+        return t(this.settings, key, vars);
+    }
+
     async syncNow(): Promise<void> {
         if (!this.syncManager) {
             throw new Error("Sync manager not initialized");
@@ -148,6 +153,18 @@ export default class MyPlugin extends Plugin {
         }
 
         await this.syncManager.syncNow();
+    }
+
+    async mirrorLocalToGitHub(): Promise<void> {
+        if (!this.syncManager) {
+            throw new Error("Sync manager not initialized");
+        }
+
+        if (!this.githubApi) {
+            throw new Error("GitHub API not initialized");
+        }
+
+        await this.syncManager.mirrorNow();
     }
 
     private initializeSync(token: string) {
@@ -179,6 +196,9 @@ export default class MyPlugin extends Plugin {
         // Update path filter if settings change
         if (this.pathFilter) {
             this.pathFilter = new PathFilter(this.settings);
+        }
+        if (this.statusBar) {
+            this.statusBar.setStatus("idle");
         }
     }
 
@@ -288,12 +308,12 @@ export default class MyPlugin extends Plugin {
     }
 
     showSyncHistory(): void {
-        new SyncHistoryModal(this.app, this.historyStore).open();
+        new SyncHistoryModal(this.app, this).open();
     }
 
     clearSyncHistory(): void {
         this.historyStore.clearHistory();
-        new Notice("Sync history cleared");
+        new Notice(this.t("notice.syncHistoryCleared"));
     }
 
     showSyncSummary(): void {
@@ -313,8 +333,7 @@ class SyncSummaryModal extends Modal {
         const { contentEl } = this;
         contentEl.empty();
 
-        contentEl.createEl("h2", { text: "Sync Summary" });
-
+        contentEl.createEl("h2", { text: this.plugin.t("summary.title") });
         const syncManager = this.plugin.syncManager;
         const metadataStore = this.plugin.metadataStore;
 
@@ -323,32 +342,32 @@ class SyncSummaryModal extends Modal {
         summaryContainer.style.gap = "16px";
 
         const currentBranch = this.plugin.settings.branch;
-        this.addSummaryRow(summaryContainer, "Current Branch", currentBranch);
+        this.addSummaryRow(summaryContainer, this.plugin.t("summary.currentBranch"), currentBranch);
 
         const lastSyncAt = metadataStore.getLastSyncAt();
         if (lastSyncAt) {
-            this.addSummaryRow(summaryContainer, "Last Sync", new Date(lastSyncAt).toLocaleString());
+            this.addSummaryRow(summaryContainer, this.plugin.t("summary.lastSync"), new Date(lastSyncAt).toLocaleString());
         } else {
-            this.addSummaryRow(summaryContainer, "Last Sync", "Never synced");
+            this.addSummaryRow(summaryContainer, this.plugin.t("summary.lastSync"), this.plugin.t("summary.neverSynced"));
         }
 
         const dirtyCount = syncManager ? syncManager.getDirtyFileCount() : 0;
-        this.addSummaryRow(summaryContainer, "Pending Changes", `${dirtyCount} file${dirtyCount !== 1 ? 's' : ''} waiting to be pushed`);
+        this.addSummaryRow(summaryContainer, this.plugin.t("summary.pendingChanges"), `${dirtyCount}`);
 
         const conflictedFiles = syncManager ? syncManager.getConflictedFiles() : [];
         const failedFiles = syncManager ? syncManager.getFailedFiles() : [];
 
-        this.addSummaryRow(summaryContainer, "Conflicts Pending", `${conflictedFiles.length} file${conflictedFiles.length !== 1 ? 's' : ''}`);
-        this.addSummaryRow(summaryContainer, "Recent Failures", `${failedFiles.length} file${failedFiles.length !== 1 ? 's' : ''}`);
+        this.addSummaryRow(summaryContainer, this.plugin.t("summary.conflictsPending"), `${conflictedFiles.length}`);
+        this.addSummaryRow(summaryContainer, this.plugin.t("summary.recentFailures"), `${failedFiles.length}`);
 
         if (syncManager) {
-            this.addFileSection(summaryContainer, "Pending Push Files", syncManager.getDirtyFiles());
-            this.addFileSection(summaryContainer, "Conflicts To Resolve", conflictedFiles);
-            this.addFileSection(summaryContainer, "Recently Failed Files", failedFiles);
+            this.addFileSection(summaryContainer, this.plugin.t("summary.pendingPushFiles"), syncManager.getDirtyFiles());
+            this.addFileSection(summaryContainer, this.plugin.t("summary.conflictsToResolve"), conflictedFiles);
+            this.addFileSection(summaryContainer, this.plugin.t("summary.failedFiles"), failedFiles);
         }
 
         const trackedFiles = metadataStore.getAllShaEntries().length;
-        this.addSummaryRow(summaryContainer, "Tracked Files", `${trackedFiles} files`);
+        this.addSummaryRow(summaryContainer, this.plugin.t("summary.trackedFiles"), `${trackedFiles}`);
     }
 
     private addSummaryRow(container: HTMLElement, label: string, value: string) {
@@ -358,9 +377,9 @@ class SyncSummaryModal extends Modal {
         row.style.borderBottom = "1px solid var(--background-modifier-border)";
         row.style.paddingBottom = "8px";
 
-        const labelEl = row.createEl("span", { text: label + ":" });
-        labelEl.style.fontWeight = "bold";
-        const valueEl = row.createEl("span", { text: value });
+        row.createEl("span", { text: label + ":" });
+        (row.firstElementChild as HTMLElement).style.fontWeight = "bold";
+        row.createEl("span", { text: value });
     }
 
     private addFileSection(container: HTMLElement, title: string, paths: string[]) {
@@ -385,11 +404,11 @@ class SyncSummaryModal extends Modal {
 }
 
 class SyncHistoryModal extends Modal {
-    private historyStore: HistoryStore;
+    private plugin: MyPlugin;
 
-    constructor(app: App, historyStore: HistoryStore) {
+    constructor(app: App, plugin: MyPlugin) {
         super(app);
-        this.historyStore = historyStore;
+        this.plugin = plugin;
     }
 
     onOpen() {
@@ -402,11 +421,11 @@ class SyncHistoryModal extends Modal {
         this.contentEl.style.display = "flex";
         this.contentEl.style.flexDirection = "column";
 
-        contentEl.createEl("h2", { text: "Sync History" });
+        contentEl.createEl("h2", { text: this.plugin.t("history.title") });
 
-        const entries = this.historyStore.getEntries();
+        const entries = this.plugin.historyStore.getEntries();
         if (entries.length === 0) {
-            contentEl.createEl("p", { text: "No sync history entries yet." });
+            contentEl.createEl("p", { text: this.plugin.t("history.empty") });
             return;
         }
 
@@ -422,7 +441,13 @@ class SyncHistoryModal extends Modal {
 
         const thead = table.createEl("thead");
         const headerRow = thead.createEl("tr");
-        ["Time", "Operation", "File", "Status", "Message"].forEach(text => {
+        [
+            this.plugin.t("history.time"),
+            this.plugin.t("history.operation"),
+            this.plugin.t("history.file"),
+            this.plugin.t("history.status"),
+            this.plugin.t("history.message")
+        ].forEach(text => {
             const th = headerRow.createEl("th");
             th.textContent = text;
             th.style.borderBottom = "1px solid var(--background-modifier-border)";

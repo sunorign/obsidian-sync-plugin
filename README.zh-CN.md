@@ -2,52 +2,48 @@
 
 [English](README.md)
 
-Obsidian GitHub Sync Plugin 是一个基于 GitHub REST API 的 Obsidian 文件同步插件，用来把你的 Vault 内容同步到 GitHub 仓库，适合不想在本地安装 Git、但希望做跨设备备份和协作的用户。
+这是一个基于 GitHub REST API 的 Obsidian 同步插件，用来把 Vault 内容同步到 GitHub，适合做跨设备备份和轻量协作，不需要在每台设备上安装 Git。
 
-## 功能特性
+## 功能
 
-### 同步流程
-- 启动时自动拉取远端内容
-- 实时监听本地文件变更
-- 关闭 Obsidian 时自动推送
-- 支持按分钟配置定时自动推送
-- `Sync Now` 现在是双向同步：
-  先拉取远端，再在没有冲突和拉取错误时推送本地改动
+### 核心同步动作
+- `Sync Now`：双向同步，先拉取远端，再在没有冲突时推送本地
+- `Mirror Local To GitHub`：以本地为准镜像到 GitHub，会上传本地文件、删除远端残留，并保留空文件夹结构
+- 启动时自动拉取
+- 实时监听本地文件变化
+- 关闭时自动推送
+- 支持按分钟配置自动推送
 
-### 仓库同步
+### 同步范围
 - 默认同步 Markdown 文件
-- 可选同步图片：
-  `.png`、`.jpg`、`.jpeg`、`.gif`、`.webp`、`.svg`
-- 可选同步 PDF：
-  `.pdf`
-- 支持配置 GitHub 仓库子目录与 Vault 子目录映射
-- 当前拉取逻辑会遍历完整仓库文件树，嵌套目录也会同步
+- 可选同步图片：`.png`、`.jpg`、`.jpeg`、`.gif`、`.webp`、`.svg`
+- 可选同步 PDF：`.pdf`
+- 支持配置 GitHub 仓库子路径和 Vault 子路径
+- 拉取时会递归遍历远端完整目录树，嵌套目录也会包含在内
 
 ### 冲突处理
-- 推送前通过 SHA 检测远端是否发生变化
-- 发生冲突时生成：
-  `.conflict.local.md` 与 `.conflict.remote.md`
+- 推送前基于 SHA 检测远端是否已变化
 - 内置全屏冲突对比看板
-- 支持按冲突块选择本地或远端内容，再保存合并结果
-- 支持隐藏未变化内容，只聚焦差异块
-- 冲突解决完成后会自动清理冲突副本文件
+- 支持按块选择 `Use Local`、`Use Remote`
+- 支持 `Save Merged` 保存合并结果
+- 支持隐藏未变化内容
+- 冲突解决后会自动清理 `.conflict.local.md` 和 `.conflict.remote.md`
 
-### 可观测性
+### 诊断能力
 - 状态栏显示同步状态
-- 提供同步历史查看面板
-- 提供同步摘要面板，并区分：
-  待推送文件、待处理冲突、最近失败文件
+- 同步摘要面板
+- 同步历史面板
+- 待处理状态拆分为：待推送、待处理冲突、最近失败
 
-### 安全性
-- 优先使用 Obsidian Secret Storage 保存 Token
-- 无 Keychain 时降级到插件目录本地文件
+### 语言与设置
+- 内置语言切换：`简体中文 / English`
+- 设置页已收敛为 `核心功能` + `高级设置`
 
-## 安装方式
+## 安装
 
 ### 手动安装
-1. 下载构建产物。
-2. 解压到你的 Vault 插件目录：
-   `.obsidian/plugins/obsidian-github-sync/`
+1. 下载发布产物。
+2. 解压到 Vault 内的 `.obsidian/plugins/obsidian-github-sync/`。
 3. 重启 Obsidian。
 4. 在设置里启用插件。
 
@@ -60,96 +56,87 @@ npm run build
 ```
 
 构建产物目录：
-`build/obsidian-github-sync/`
 
-将该目录复制到 Vault 插件目录下：
-```bash
-cp -r build/obsidian-github-sync <your-vault>/.obsidian/plugins/
+```text
+build/obsidian-github-sync/
 ```
 
 ## GitHub Token
 
 插件需要 GitHub Personal Access Token。
 
-### 推荐方式
-使用 Fine-grained PAT，并授予：
+推荐权限：
 - Repository access：仅目标仓库
-- Repository permissions：
-  `Contents: Read and write`
+- Repository permissions：`Contents: Read and write`
 
-### Classic PAT
 如果使用 Classic PAT，至少需要：
 - `repo`
 
 ## 使用说明
 
-### 1. 插件配置
-在 Obsidian 设置 -> 本插件 中填写：
-- `Owner`：GitHub 用户或组织
-- `Repo`：仓库名
-- `Branch`：默认 `main`
-- `Repo Path`：仓库内同步子目录，留空表示仓库根目录
-- `Vault SubPath`：Vault 内同步子目录，留空表示 Vault 根目录
+### 1. 配置插件
+在 Obsidian 的插件设置中填写：
+- `GitHub Token`
+- `Owner`
+- `Repo`
+- `Branch`
+- `Remote Path`
+- `Local Path`
 
-填入 Token 后保存，并使用 `Test Connection` 验证。
+然后点击 `Test Connection`。
 
-### 2. 同步行为
-- 启动拉取：把远端变更同步到本地
-- 关闭推送：把本地改动上传到 GitHub
-- 定时推送：按配置间隔推送 dirty 文件
-- `Sync Now` 当前行为：
-  1. 先执行拉取
-  2. 如果拉取发现冲突，则停止，不继续推送
-  3. 如果拉取报错，则停止，不继续推送
-  4. 只有拉取成功且无冲突时，才继续推送本地改动
+### 2. 选择合适的同步动作
+- 当本地和远端都可能有新内容，而且你希望优先保护双方改动时，用 `Sync Now`
+- 当你希望 GitHub 最终和本地一模一样时，用 `Mirror Local To GitHub`
 
-### 3. 冲突处理流程
-- 检测到 push 或 pull 冲突后，会打开内置 compare 看板
-- 每个冲突块都可以选择 `Use Local` 或 `Use Remote`
-- 点击 `Save Merged` 会把合并结果写回原始文件
-- 完成后下一次同步会基于新的本地合并结果继续执行
+### 3. 空文件夹说明
+GitHub 不能原生保存空目录。插件会通过占位文件保留目录结构：
 
-### 4. 诊断与排查
-- `View Summary`：
-  查看当前分支、最近同步时间、待推送文件、冲突文件、失败文件
-- `View History`：
-  查看最近同步操作、状态和错误信息
+```text
+.obsidian-github-sync.keep
+```
 
-## 架构说明
+拉取时会自动恢复本地目录结构，并把占位文件从正常同步范围里隐藏掉。
 
-核心模块：
+### 4. 冲突处理流程
+- 当 pull 或 push 发生冲突时，会自动打开对比看板
+- 逐个检查冲突块
+- 对每个冲突块选择 `Use Local` 或 `Use Remote`
+- 也可以直接整份保留本地或远端
+- 点击 `Save Merged` 后，合并结果会写回原文件
+
+### 5. 高级工具
+`高级设置` 中保留了这些功能：
+- 图片和 PDF 同步开关
+- 仅同步 Markdown
+- 排除规则
+- 分支管理
+- 同步摘要
+- 同步历史
+
+## 架构
 
 ```text
 src/
-├─ main.ts              插件入口与生命周期
-├─ settings.ts          设置面板
-├─ types.ts             共享类型与默认配置
-├─ github-api.ts        GitHub API 封装
-├─ sync-manager.ts      拉取/推送流程编排
-├─ conflict-resolver.ts 冲突对比与合并看板
-├─ metadata-store.ts    SHA 与 base 快照存储
-├─ history-store.ts     同步历史存储
-├─ path-filter.ts       文件过滤与排除规则
-├─ status-bar.ts        状态栏更新
-└─ logger.ts            日志
+├── main.ts              插件入口与生命周期
+├── settings.ts          设置界面
+├── i18n.ts              中英文文案
+├── types.ts             共享类型与默认配置
+├── github-api.ts        GitHub API 封装
+├── sync-manager.ts      拉取、推送、镜像流程编排
+├── conflict-resolver.ts 冲突对比与合并看板
+├── metadata-store.ts    SHA 与 base 快照存储
+├── history-store.ts     同步历史存储
+├── path-filter.ts       文件过滤与排除规则
+├── status-bar.ts        状态栏更新
+└── logger.ts            日志
 ```
 
-## 近期改动
+## 说明
 
-当前代码已经包含以下较新的行为：
-- `Sync Now` 从“仅推送”改为“双向同步”
-- 修复远端嵌套目录拉取
-- 部分推送失败时不再清空所有 dirty 文件
-- 重构冲突看板，支持按块合并
-- 冲突看板支持隐藏未变化内容
-- 同步摘要区分待推送、冲突、失败三类状态
-- 同步历史弹窗改宽，更适合查看日志
-
-## 注意事项
-
-- `onunload()` 不是绝对可靠的最后一次同步时机，仍建议搭配定时推送使用。
-- `Test Connection` 只验证仓库访问能力，不能完全代表 pull / push 在所有文件状态下都一定成功。
-- 当前冲突看板主要还是两方 diff，并结合已保存的 base 快照为后续三方比较做准备；真正的三方冲突分类还在继续演进中。
+- `Test Connection` 只验证仓库访问能力。
+- 当前冲突界面仍以两方 diff 和已保存的 base 快照为基础。
+- 真正的三方冲突分类还在后续演进中。
 
 ## 开发
 

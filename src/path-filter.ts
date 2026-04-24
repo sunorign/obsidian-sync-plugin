@@ -1,5 +1,6 @@
 import { PluginSettings } from "./types";
 import { minimatch } from "minimatch";
+import { isEmptyDirPlaceholderPath } from "./constants";
 
 // Supported attachment extensions
 const IMAGE_EXTENSIONS = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg'];
@@ -13,6 +14,10 @@ export class PathFilter {
     }
 
     shouldSync(path: string): boolean {
+        if (isEmptyDirPlaceholderPath(path)) {
+            return false;
+        }
+
         // 1. Skip conflict files
         if (path.includes('.conflict.') && (path.endsWith('.local.md') || path.endsWith('.remote.md'))) {
             return false;

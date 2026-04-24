@@ -1,4 +1,5 @@
 export interface PluginSettings {
+    language: "zh-CN" | "en";
     owner: string;
     repo: string;
     branch: string;
@@ -28,6 +29,7 @@ export interface CreateBranchInput {
 }
 
 export const DEFAULT_SETTINGS: PluginSettings = {
+    language: "zh-CN",
     owner: "",
     repo: "",
     branch: "main",

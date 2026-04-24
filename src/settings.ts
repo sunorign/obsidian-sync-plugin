@@ -1,11 +1,10 @@
-import { App, PluginSettingTab, Setting, Notice, Modal } from "obsidian";
+import { App, Notice, Modal, PluginSettingTab, Setting } from "obsidian";
 import MyPlugin from "./main";
 import { PathFilter } from "./path-filter";
-import { DEFAULT_SETTINGS } from "./types";
 
 export class GitHubSyncSettingTab extends PluginSettingTab {
     plugin: MyPlugin;
-    private _newBranchName: string = "";
+    private newBranchName = "";
 
     constructor(app: App, plugin: MyPlugin) {
         super(app, plugin);
@@ -14,56 +13,72 @@ export class GitHubSyncSettingTab extends PluginSettingTab {
 
     display(): void {
         const { containerEl } = this;
+        const t = this.plugin.t.bind(this.plugin);
 
         containerEl.empty();
-
-        containerEl.createEl("h2", { text: "GitHub Sync Settings" });
+        containerEl.createEl("h2", { text: t("settings.title") });
 
         new Setting(containerEl)
-            .setName("GitHub Token")
-            .setDesc("GitHub Personal Access Token (Fine-grained PAT recommended)")
+            .setName(t("settings.language.name"))
+            .setDesc(t("settings.language.desc"))
+            .addDropdown((dropdown) =>
+                dropdown
+                    .addOption("zh-CN", t("settings.language.zh"))
+                    .addOption("en", t("settings.language.en"))
+                    .setValue(this.plugin.settings.language)
+                    .onChange(async (value) => {
+                        this.plugin.settings.language = value === "en" ? "en" : "zh-CN";
+                        await this.plugin.saveSettings();
+                        this.display();
+                    })
+            );
+
+        containerEl.createEl("h3", { text: t("settings.core") });
+
+        new Setting(containerEl)
+            .setName(t("settings.token.name"))
+            .setDesc(t("settings.token.desc"))
             .addText(async (text) => {
                 const currentToken = await this.plugin.loadToken();
                 text
-                    .setPlaceholder("github_pat_...")
+                    .setPlaceholder(t("settings.token.placeholder"))
                     .setValue(currentToken || "")
                     .onChange(async (value) => {
                         if (value) {
                             await this.plugin.saveToken(value);
-                            new Notice("Token saved securely");
+                            new Notice(t("settings.token.savedSecurely"));
                         }
                     });
             })
             .addButton((button) =>
-                button.setButtonText("Save Token").onClick(async () => {
-                    new Notice("Token saved");
+                button.setButtonText(t("settings.token.saveButton")).onClick(() => {
+                    new Notice(t("settings.token.saved"));
                 })
             )
             .addButton((button) =>
-                button.setButtonText("Test Connection").onClick(async () => {
+                button.setButtonText(t("settings.token.testButton")).onClick(async () => {
                     try {
                         await this.plugin.testConnection();
-                        new Notice("GitHub connection successful!");
+                        new Notice(t("settings.token.testSuccess"));
                     } catch (error: any) {
-                        new Notice(`Connection failed: ${error.message}`);
+                        new Notice(t("notice.connection.failed", { message: error.message }));
                     }
                 })
             )
             .addButton((button) =>
-                button.setButtonText("Delete Token").onClick(async () => {
+                button.setButtonText(t("settings.token.deleteButton")).onClick(async () => {
                     await this.plugin.deleteToken();
-                    new Notice("Token deleted");
-                    // Refresh the display
+                    new Notice(t("settings.token.deleted"));
                     this.display();
                 })
             );
 
         new Setting(containerEl)
-            .setName("GitHub Owner")
-            .setDesc("The owner of the repository (user or organization)")
+            .setName(t("settings.owner.name"))
+            .setDesc(t("settings.owner.desc"))
             .addText((text) =>
                 text
-                    .setPlaceholder("username")
+                    .setPlaceholder(t("settings.owner.placeholder"))
                     .setValue(this.plugin.settings.owner)
                     .onChange(async (value) => {
                         this.plugin.settings.owner = value;
@@ -72,11 +87,11 @@ export class GitHubSyncSettingTab extends PluginSettingTab {
             );
 
         new Setting(containerEl)
-            .setName("GitHub Repo")
-            .setDesc("The name of the repository")
+            .setName(t("settings.repo.name"))
+            .setDesc(t("settings.repo.desc"))
             .addText((text) =>
                 text
-                    .setPlaceholder("my-notes")
+                    .setPlaceholder(t("settings.repo.placeholder"))
                     .setValue(this.plugin.settings.repo)
                     .onChange(async (value) => {
                         this.plugin.settings.repo = value;
@@ -85,11 +100,11 @@ export class GitHubSyncSettingTab extends PluginSettingTab {
             );
 
         new Setting(containerEl)
-            .setName("Branch")
-            .setDesc("The branch to sync with (default: main)")
+            .setName(t("settings.branch.name"))
+            .setDesc(t("settings.branch.desc"))
             .addText((text) =>
                 text
-                    .setPlaceholder("main")
+                    .setPlaceholder(t("settings.branch.placeholder"))
                     .setValue(this.plugin.settings.branch)
                     .onChange(async (value) => {
                         this.plugin.settings.branch = value || "main";
@@ -98,11 +113,11 @@ export class GitHubSyncSettingTab extends PluginSettingTab {
             );
 
         new Setting(containerEl)
-            .setName("Remote Path")
-            .setDesc("The path in the repository to sync (empty for root)")
+            .setName(t("settings.remotePath.name"))
+            .setDesc(t("settings.remotePath.desc"))
             .addText((text) =>
                 text
-                    .setPlaceholder("notes")
+                    .setPlaceholder(t("settings.remotePath.placeholder"))
                     .setValue(this.plugin.settings.repoPath)
                     .onChange(async (value) => {
                         this.plugin.settings.repoPath = value;
@@ -111,11 +126,11 @@ export class GitHubSyncSettingTab extends PluginSettingTab {
             );
 
         new Setting(containerEl)
-            .setName("Local Path")
-            .setDesc("The sub-path in your Vault to sync (empty for root)")
+            .setName(t("settings.localPath.name"))
+            .setDesc(t("settings.localPath.desc"))
             .addText((text) =>
                 text
-                    .setPlaceholder("GitHubSync")
+                    .setPlaceholder(t("settings.localPath.placeholder"))
                     .setValue(this.plugin.settings.vaultSubPath)
                     .onChange(async (value) => {
                         this.plugin.settings.vaultSubPath = value;
@@ -124,8 +139,8 @@ export class GitHubSyncSettingTab extends PluginSettingTab {
             );
 
         new Setting(containerEl)
-            .setName("Auto Pull on Startup")
-            .setDesc("Automatically pull changes from GitHub when Obsidian starts")
+            .setName(t("settings.autoPull.name"))
+            .setDesc(t("settings.autoPull.desc"))
             .addToggle((toggle) =>
                 toggle
                     .setValue(this.plugin.settings.autoPullOnStartup)
@@ -136,8 +151,57 @@ export class GitHubSyncSettingTab extends PluginSettingTab {
             );
 
         new Setting(containerEl)
-            .setName("Auto Push on Shutdown")
-            .setDesc("Automatically push local changes to GitHub when Obsidian closes")
+            .setName(t("settings.autoPushInterval.name"))
+            .setDesc(t("settings.autoPushInterval.desc"))
+            .addText((text) =>
+                text
+                    .setPlaceholder(t("settings.autoPushInterval.placeholder"))
+                    .setValue(String(this.plugin.settings.autoPushInterval))
+                    .onChange(async (value) => {
+                        const interval = Number.parseInt(value, 10);
+                        this.plugin.settings.autoPushInterval = Number.isNaN(interval) || interval < 0 ? 0 : interval;
+                        await this.plugin.saveSettings();
+                        this.plugin.restartAutoPushTimer();
+                    })
+            );
+
+        new Setting(containerEl)
+            .setName(t("settings.syncNow.name"))
+            .setDesc(t("settings.syncNow.desc"))
+            .addButton((button) =>
+                button.setCta().setButtonText(t("settings.syncNow.button")).onClick(async () => {
+                    try {
+                        new Notice(t("notice.sync.start"));
+                        await this.plugin.syncNow();
+                        new Notice(t("notice.sync.done"));
+                    } catch (error: any) {
+                        new Notice(t("notice.sync.failed", { message: error.message }));
+                    }
+                })
+            );
+
+        new Setting(containerEl)
+            .setName(t("settings.mirror.name"))
+            .setDesc(t("settings.mirror.desc"))
+            .addButton((button) =>
+                button.setButtonText(t("settings.mirror.button")).onClick(async () => {
+                    try {
+                        new Notice(t("notice.mirror.start"));
+                        await this.plugin.mirrorLocalToGitHub();
+                        new Notice(t("notice.mirror.done"));
+                    } catch (error: any) {
+                        new Notice(t("notice.mirror.failed", { message: error.message }));
+                    }
+                })
+            );
+
+        const advancedDetails = containerEl.createEl("details", { cls: "github-sync-advanced-settings" });
+        advancedDetails.createEl("summary", { text: t("settings.advanced") });
+        const advancedBody = advancedDetails.createDiv();
+
+        new Setting(advancedBody)
+            .setName(t("settings.autoPushOnShutdown.name"))
+            .setDesc(t("settings.autoPushOnShutdown.desc"))
             .addToggle((toggle) =>
                 toggle
                     .setValue(this.plugin.settings.autoPushOnShutdown)
@@ -147,9 +211,9 @@ export class GitHubSyncSettingTab extends PluginSettingTab {
                     })
             );
 
-        new Setting(containerEl)
-            .setName("Sync Markdown Only")
-            .setDesc("Only sync .md files (recommended for MVP)")
+        new Setting(advancedBody)
+            .setName(t("settings.syncMarkdownOnly.name"))
+            .setDesc(t("settings.syncMarkdownOnly.desc"))
             .addToggle((toggle) =>
                 toggle
                     .setValue(this.plugin.settings.syncMarkdownOnly)
@@ -159,9 +223,9 @@ export class GitHubSyncSettingTab extends PluginSettingTab {
                     })
             );
 
-        new Setting(containerEl)
-            .setName("Sync Image Files")
-            .setDesc("Sync image files: .png, .jpg, .jpeg, .gif, .webp, .svg")
+        new Setting(advancedBody)
+            .setName(t("settings.syncImages.name"))
+            .setDesc(t("settings.syncImages.desc"))
             .addToggle((toggle) =>
                 toggle
                     .setValue(this.plugin.settings.syncImages)
@@ -171,9 +235,9 @@ export class GitHubSyncSettingTab extends PluginSettingTab {
                     })
             );
 
-        new Setting(containerEl)
-            .setName("Sync PDF Files")
-            .setDesc("Sync PDF files (.pdf)")
+        new Setting(advancedBody)
+            .setName(t("settings.syncPdf.name"))
+            .setDesc(t("settings.syncPdf.desc"))
             .addToggle((toggle) =>
                 toggle
                     .setValue(this.plugin.settings.syncPDF)
@@ -183,117 +247,83 @@ export class GitHubSyncSettingTab extends PluginSettingTab {
                     })
             );
 
-        new Setting(containerEl)
-            .setName("Auto Push Interval (minutes)")
-            .setDesc("Automatically push changes every X minutes (0 = disabled)")
-            .addText((text) =>
+        new Setting(advancedBody)
+            .setName(t("settings.exclude.name"))
+            .setDesc(t("settings.exclude.desc"))
+            .addTextArea((text) =>
                 text
-                    .setPlaceholder("0")
-                    .setValue(this.plugin.settings.autoPushInterval.toString())
+                    .setPlaceholder(t("settings.exclude.placeholder"))
+                    .setValue(this.plugin.settings.excludePatterns.join("\n"))
                     .onChange(async (value) => {
-                        const interval = parseInt(value);
-                        this.plugin.settings.autoPushInterval = !isNaN(interval) && interval >= 0 ? interval : 0;
+                        this.plugin.settings.excludePatterns = value
+                            .split("\n")
+                            .map((pattern) => pattern.trim())
+                            .filter((pattern) => pattern.length > 0);
                         await this.plugin.saveSettings();
-                        this.plugin.restartAutoPushTimer();
+                        this.plugin.pathFilter = new PathFilter(this.plugin.settings);
                     })
             );
 
-        new Setting(containerEl)
-            .setName("Manual Sync")
-            .setDesc("Pull remote changes first, then push local changes if no conflicts are found")
+        advancedBody.createEl("h4", { text: t("settings.branchMgmt.title") });
+
+        new Setting(advancedBody)
+            .setName(t("settings.currentBranch.name"))
+            .setDesc(t("settings.currentBranch.desc", { branch: this.plugin.settings.branch || "main" }))
             .addButton((button) =>
-                button.setButtonText("Sync Now").onClick(async () => {
+                button.setButtonText(t("settings.loadBranches.button")).onClick(async () => {
                     try {
-                        new Notice("Starting sync...");
-                        await this.plugin.syncNow();
-                        new Notice("Sync completed!");
-                    } catch (error: any) {
-                        new Notice(`Sync failed: ${error.message}`);
-                    }
-                })
-            );
-
-        containerEl.createEl("hr");
-        containerEl.createEl("h3", { text: "Exclusion Patterns" });
-
-        new Setting(containerEl)
-            .setName("Exclude Patterns")
-            .setDesc("One pattern per line. Supports glob patterns (e.g., *.tmp, **/.git/**)")
-            .addTextArea((text) => {
-                text
-                    .setPlaceholder("*.tmp\n**/.git/**\n**/*.log")
-                    .setValue(this.plugin.settings.excludePatterns.join("\n"))
-                    .onChange(async (value) => {
-                        this.plugin.settings.excludePatterns = value.split("\n").map(p => p.trim()).filter(p => p.length > 0);
-                        await this.plugin.saveSettings();
-                        if (this.plugin.pathFilter) {
-                            this.plugin.pathFilter = new PathFilter(this.plugin.settings);
-                        }
-                    });
-            });
-
-        containerEl.createEl("hr");
-        containerEl.createEl("h3", { text: "Branch Management" });
-
-        new Setting(containerEl)
-            .setName("Current Branch")
-            .setDesc(`Current branch: ${this.plugin.settings.branch || 'main'}`)
-            .addButton((button) =>
-                button.setButtonText("Load Branches").onClick(async () => {
-                    try {
-                        new Notice("Loading branches...");
+                        new Notice(t("notice.loadingBranches"));
                         const branches = await this.plugin.listBranches();
                         this.showBranchList(branches);
                     } catch (error: any) {
-                        new Notice(`Failed to load branches: ${error.message}`);
+                        new Notice(t("notice.loadBranchesFailed", { message: error.message }));
                     }
                 })
             );
 
-        new Setting(containerEl)
-            .setName("Create New Branch")
-            .setDesc("Create a new branch from current branch")
+        new Setting(advancedBody)
+            .setName(t("settings.createBranch.name"))
+            .setDesc(t("settings.createBranch.desc"))
             .addText((text) =>
                 text
-                    .setPlaceholder("new-branch-name")
-                    .onChange(async (value) => {
-                        this._newBranchName = value.trim();
+                    .setPlaceholder(t("settings.createBranch.placeholder"))
+                    .onChange((value) => {
+                        this.newBranchName = value.trim();
                     })
             )
             .addButton((button) =>
-                button.setButtonText("Create").onClick(async () => {
-                    if (!this._newBranchName) {
-                        new Notice("Please enter a branch name");
+                button.setButtonText(t("settings.create.button")).onClick(async () => {
+                    if (!this.newBranchName) {
+                        new Notice(t("notice.branchNameRequired"));
                         return;
                     }
+
                     try {
-                        await this.plugin.createBranch(this._newBranchName);
-                        new Notice(`Branch ${this._newBranchName} created successfully`);
+                        await this.plugin.createBranch(this.newBranchName);
+                        new Notice(t("notice.branchCreated", { branch: this.newBranchName }));
                         this.display();
                     } catch (error: any) {
-                        new Notice(`Failed to create branch: ${error.message}`);
+                        new Notice(t("notice.branchCreateFailed", { message: error.message }));
                     }
                 })
             );
 
-        containerEl.createEl("hr");
-        containerEl.createEl("h3", { text: "Sync Summary" });
+        advancedBody.createEl("h4", { text: t("settings.summary.title") });
 
-        new Setting(containerEl)
-            .setName("Sync Summary")
-            .setDesc("Show current sync status, last sync time and pending changes")
+        new Setting(advancedBody)
+            .setName(t("settings.summary.name"))
+            .setDesc(t("settings.summary.desc"))
             .addButton((button) =>
-                button.setButtonText("View Summary").onClick(() => {
+                button.setButtonText(t("settings.summary.button")).onClick(() => {
                     this.plugin.showSyncSummary();
                 })
             );
 
-        containerEl.createEl("hr");
-        containerEl.createEl("h3", { text: "Sync History" });
+        advancedBody.createEl("h4", { text: t("settings.history.title") });
 
-        new Setting(containerEl)
-            .setName("Enable Sync History")
-            .setDesc("Log all sync operations for troubleshooting")
+        new Setting(advancedBody)
+            .setName(t("settings.history.enable.name"))
+            .setDesc(t("settings.history.enable.desc"))
             .addToggle((toggle) =>
                 toggle
                     .setValue(this.plugin.settings.enableSyncHistory)
@@ -303,43 +333,41 @@ export class GitHubSyncSettingTab extends PluginSettingTab {
                     })
             );
 
-        new Setting(containerEl)
-            .setName("Max History Entries")
-            .setDesc("Maximum number of history entries to keep (default: 100)")
+        new Setting(advancedBody)
+            .setName(t("settings.history.max.name"))
+            .setDesc(t("settings.history.max.desc"))
             .addText((text) =>
                 text
-                    .setPlaceholder("100")
-                    .setValue(this.plugin.settings.maxSyncHistoryEntries.toString())
+                    .setPlaceholder(t("settings.history.max.placeholder"))
+                    .setValue(String(this.plugin.settings.maxSyncHistoryEntries))
                     .onChange(async (value) => {
-                        const max = parseInt(value);
-                        this.plugin.settings.maxSyncHistoryEntries = !isNaN(max) && max > 0 ? max : 100;
+                        const maxEntries = Number.parseInt(value, 10);
+                        this.plugin.settings.maxSyncHistoryEntries = Number.isNaN(maxEntries) || maxEntries <= 0 ? 100 : maxEntries;
                         await this.plugin.saveSettings();
-                        if (this.plugin.historyStore) {
-                            this.plugin.historyStore.setMaxEntries(this.plugin.settings.maxSyncHistoryEntries);
-                        }
+                        this.plugin.historyStore.setMaxEntries(this.plugin.settings.maxSyncHistoryEntries);
                     })
             );
 
-        new Setting(containerEl)
-            .setName("View History")
-            .setDesc("View recent sync operations and their results")
+        new Setting(advancedBody)
+            .setName(t("settings.history.view.name"))
+            .setDesc(t("settings.history.view.desc"))
             .addButton((button) =>
-                button.setButtonText("View History").onClick(() => {
+                button.setButtonText(t("settings.history.view.button")).onClick(() => {
                     this.plugin.showSyncHistory();
                 })
             )
             .addButton((button) =>
-                button.setButtonText("Clear History").onClick(async () => {
+                button.setButtonText(t("settings.history.clear.button")).onClick(() => {
                     this.plugin.clearSyncHistory();
                 })
             );
     }
 
-    private showBranchList(branches: Array<{name: string, isDefault: boolean, protected: boolean}>) {
+    private showBranchList(branches: Array<{ name: string; isDefault: boolean; protected: boolean }>) {
         const modal = new BranchListModal(this.app, this.plugin, branches, (selectedBranch: string) => {
             this.plugin.settings.branch = selectedBranch;
             this.plugin.saveSettings().then(() => {
-                new Notice(`Switched to branch: ${selectedBranch}`);
+                new Notice(this.plugin.t("notice.branchSwitched", { branch: selectedBranch }));
                 if (this.plugin.githubApi) {
                     this.plugin.githubApi.updateCurrentBranch(selectedBranch);
                 }
@@ -352,13 +380,13 @@ export class GitHubSyncSettingTab extends PluginSettingTab {
 
 class BranchListModal extends Modal {
     private plugin: MyPlugin;
-    private branches: Array<{name: string, isDefault: boolean, protected: boolean}>;
+    private branches: Array<{ name: string; isDefault: boolean; protected: boolean }>;
     private onSelect: (branch: string) => void;
 
     constructor(
         app: App,
         plugin: MyPlugin,
-        branches: Array<{name: string, isDefault: boolean, protected: boolean}>,
+        branches: Array<{ name: string; isDefault: boolean; protected: boolean }>,
         onSelect: (branch: string) => void
     ) {
         super(app);
@@ -369,13 +397,13 @@ class BranchListModal extends Modal {
 
     onOpen() {
         const { contentEl } = this;
-        contentEl.empty();
-
-        contentEl.createEl("h2", { text: "Select Branch" });
-
+        const t = this.plugin.t.bind(this.plugin);
         const currentBranch = this.plugin.settings.branch;
 
-        this.branches.forEach(branch => {
+        contentEl.empty();
+        contentEl.createEl("h2", { text: t("branch.selectTitle") });
+
+        this.branches.forEach((branch) => {
             const container = contentEl.createEl("div", { cls: "branch-item" });
             container.style.padding = "8px";
             container.style.margin = "4px 0";
@@ -387,7 +415,7 @@ class BranchListModal extends Modal {
                 container.style.color = "var(--text-on-accent)";
             }
 
-            container.onclick = async () => {
+            container.onclick = () => {
                 this.onSelect(branch.name);
                 this.close();
             };
@@ -396,21 +424,22 @@ class BranchListModal extends Modal {
             nameSpan.style.fontWeight = branch.isDefault ? "bold" : "normal";
 
             if (branch.isDefault) {
-                const badge = container.createEl("span", { text: " (default)" });
+                const badge = container.createEl("span", { text: ` ${t("branch.defaultBadge")}` });
                 badge.style.fontSize = "0.8em";
                 badge.style.marginLeft = "8px";
                 badge.style.opacity = "0.8";
             }
 
             if (branch.protected) {
-                const badge = container.createEl("span", { text: " 🔒" });
-                badge.title = "Protected branch";
+                const badge = container.createEl("span", { text: ` ${t("branch.protectedBadge")}` });
+                badge.style.fontSize = "0.8em";
+                badge.style.marginLeft = "8px";
+                badge.style.opacity = "0.8";
             }
         });
     }
 
     onClose() {
-        const { contentEl } = this;
-        contentEl.empty();
+        this.contentEl.empty();
     }
 }

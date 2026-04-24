@@ -1,10 +1,13 @@
-import { SyncStatus } from "./types";
+import { t } from "./i18n";
+import { SyncStatus, PluginSettings } from "./types";
 
 export class StatusBar {
     private statusBarItem: HTMLElement;
+    private settings: PluginSettings;
 
-    constructor(statusBarItem: HTMLElement) {
+    constructor(statusBarItem: HTMLElement, settings: PluginSettings) {
         this.statusBarItem = statusBarItem;
+        this.settings = settings;
         this.setStatus("idle");
     }
 
@@ -14,28 +17,28 @@ export class StatusBar {
 
         switch (status) {
             case "idle":
-                text += "idle";
+                text += t(this.settings, "status.idle");
                 break;
             case "pulling":
-                text += "pulling...";
+                text += t(this.settings, "status.pulling");
                 color = "var(--text-accent)";
                 break;
             case "pushing":
-                text += "pushing...";
+                text += t(this.settings, "status.pushing");
                 color = "var(--text-accent)";
                 break;
             case "success":
-                text += "success";
+                text += t(this.settings, "status.success");
                 color = "var(--text-success)";
                 // Reset to idle after a few seconds
                 setTimeout(() => this.setStatus("idle"), 5000);
                 break;
             case "conflict":
-                text += "conflict";
+                text += t(this.settings, "status.conflict");
                 color = "var(--text-error)";
                 break;
             case "error":
-                text += "error";
+                text += t(this.settings, "status.error");
                 color = "var(--text-error)";
                 break;
         }

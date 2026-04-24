@@ -1,5 +1,7 @@
 import { App, normalizePath, Notice, TFile, Modal } from "obsidian";
 import { Logger } from "./logger";
+import { PluginSettings } from "./types";
+import { t } from "./i18n";
 
 type DiffKind = "equal" | "added" | "removed" | "modified";
 type ResolutionChoice = "local" | "remote";
@@ -30,10 +32,12 @@ type VisibleRun =
 export class ConflictResolver {
     private app: App;
     private logger: Logger;
+    private settings: PluginSettings;
 
-    constructor(app: App, logger: Logger) {
+    constructor(app: App, logger: Logger, settings: PluginSettings) {
         this.app = app;
         this.logger = logger;
+        this.settings = settings;
     }
 
     async resolvePullConflict(input: {
@@ -59,6 +63,7 @@ export class ConflictResolver {
                 input.baseContent,
                 input.localContent,
                 input.remoteContent,
+                (key, vars) => this.translate(key, vars),
                 async (content: string, label: string) => {
                     await this.applyResolution(input.path, content, label);
                 }
@@ -67,7 +72,7 @@ export class ConflictResolver {
             this.logger.info(`Conflict files created for ${input.path}, compare view opened`);
         } catch (error) {
             this.logger.error(`Failed to create conflict files for ${input.path}`, error);
-            new Notice(`Failed to handle conflict for ${input.path}. Check logs.`);
+            new Notice(this.translate("conflict.handleFailed", { path: input.path }));
         }
     }
 
@@ -94,6 +99,7 @@ export class ConflictResolver {
                 input.baseContent,
                 input.localContent,
                 input.remoteContent,
+                (key, vars) => this.translate(key, vars),
                 async (content: string, label: string) => {
                     await this.applyResolution(input.path, content, label);
                 }
@@ -102,7 +108,7 @@ export class ConflictResolver {
             this.logger.info(`Push conflict handled, compare view opened for ${input.path}`);
         } catch (error) {
             this.logger.error(`Failed to create push conflict files for ${input.path}`, error);
-            new Notice(`Failed to handle conflict for ${input.path}. Check logs.`);
+            new Notice(this.translate("conflict.handleFailed", { path: input.path }));
         }
     }
 
@@ -120,7 +126,7 @@ export class ConflictResolver {
         if (file instanceof TFile) {
             await this.app.vault.modify(file, content);
             await this.cleanupConflictFiles(conflictPaths);
-            new Notice(`Conflict resolved: ${label}`);
+            new Notice(this.translate("conflict.resolvedNotice", { label }));
             this.logger.info(`Conflict resolved for ${path}: ${label}`);
         }
     }
@@ -143,6 +149,10 @@ export class ConflictResolver {
             }
         }
     }
+
+    private translate(key: Parameters<typeof t>[1], vars?: Record<string, string | number>): string {
+        return t(this.settings, key, vars);
+    }
 }
 
 class DiffConflictModal extends Modal {
@@ -158,6 +168,7 @@ class DiffConflictModal extends Modal {
     private showOnlyChanges = true;
     private compareGridEl!: HTMLElement;
     private modeLabelEl!: HTMLElement;
+    private readonly translate: (key: Parameters<typeof t>[1], vars?: Record<string, string | number>) => string;
 
     constructor(
         app: App,
@@ -166,6 +177,7 @@ class DiffConflictModal extends Modal {
         baseContent: string | undefined,
         localContent: string,
         remoteContent: string,
+        translate: (key: Parameters<typeof t>[1], vars?: Record<string, string | number>) => string,
         onResolve: (content: string, label: string) => Promise<void>
     ) {
         super(app);
@@ -175,6 +187,7 @@ class DiffConflictModal extends Modal {
         this.localContent = localContent;
         this.remoteContent = remoteContent;
         this.onResolve = onResolve;
+        this.translate = translate;
         this.diffRows = buildDiffRows(localContent, remoteContent);
         this.hunks = buildDiffHunks(this.diffRows);
         this.hunks.forEach(hunk => this.resolutionChoices.set(hunk.id, "local"));
@@ -202,29 +215,29 @@ class DiffConflictModal extends Modal {
         headerText.createEl("h2", { text: this.filePath });
         headerText.createEl("p", {
             text: this.conflictType === "pull"
-                ? "Remote changed while you edited locally. Review each conflict block and save the merged result."
-                : "Remote changed before your push. Review each conflict block and save the merged result."
+                ? this.translate("conflict.pullDesc")
+                : this.translate("conflict.pushDesc")
         });
 
         const actions = header.createEl("div", { cls: "github-sync-compare-actions" });
 
-        const acceptLocalButton = actions.createEl("button", { text: "Accept All Local" });
+        const acceptLocalButton = actions.createEl("button", { text: this.translate("conflict.acceptLocal") });
         acceptLocalButton.addClass("mod-cta");
         acceptLocalButton.onclick = async () => {
-            await this.onResolve(this.localContent, "kept local version");
+            await this.onResolve(this.localContent, this.translate("conflict.keepLocalLabel"));
             this.close();
         };
 
-        const acceptRemoteButton = actions.createEl("button", { text: "Accept All Remote" });
+        const acceptRemoteButton = actions.createEl("button", { text: this.translate("conflict.acceptRemote") });
         acceptRemoteButton.onclick = async () => {
-            await this.onResolve(this.remoteContent, "kept remote version");
+            await this.onResolve(this.remoteContent, this.translate("conflict.keepRemoteLabel"));
             this.close();
         };
 
-        const saveMergedButton = actions.createEl("button", { text: "Save Merged" });
+        const saveMergedButton = actions.createEl("button", { text: this.translate("conflict.saveMerged") });
         saveMergedButton.addClass("mod-cta");
         saveMergedButton.onclick = async () => {
-            await this.onResolve(this.buildMergedContent(), "saved merged result");
+            await this.onResolve(this.buildMergedContent(), this.translate("conflict.saveMergedLabel"));
             this.close();
         };
 
@@ -237,29 +250,29 @@ class DiffConflictModal extends Modal {
             text: `${changedRows} changed row${changedRows !== 1 ? "s" : ""}`
         });
         this.modeLabelEl = summary.createEl("span", {
-            text: this.showOnlyChanges ? "Showing changed blocks only" : "Showing full file"
+            text: this.showOnlyChanges ? this.translate("conflict.changedOnly") : this.translate("conflict.fullFile")
         });
         if (this.baseContent) {
             summary.createEl("span", {
-                text: "Base snapshot available for upcoming 3-way compare"
+                text: this.translate("conflict.baseSnapshot")
             });
         }
 
         const toggleVisibilityButton = actions.createEl("button", {
-            text: this.showOnlyChanges ? "Show Full File" : "Hide Unchanged"
+            text: this.showOnlyChanges ? this.translate("conflict.showFullFile") : this.translate("conflict.hideUnchanged")
         });
         toggleVisibilityButton.onclick = () => {
             this.showOnlyChanges = !this.showOnlyChanges;
-            toggleVisibilityButton.setText(this.showOnlyChanges ? "Show Full File" : "Hide Unchanged");
-            this.modeLabelEl.setText(this.showOnlyChanges ? "Showing changed blocks only" : "Showing full file");
+            toggleVisibilityButton.setText(this.showOnlyChanges ? this.translate("conflict.showFullFile") : this.translate("conflict.hideUnchanged"));
+            this.modeLabelEl.setText(this.showOnlyChanges ? this.translate("conflict.changedOnly") : this.translate("conflict.fullFile"));
             this.renderCompareGrid();
         };
 
         if (this.hunks.length === 0) {
             const notice = shell.createEl("div", { cls: "github-sync-compare-empty" });
-            notice.createEl("strong", { text: "No textual differences detected." });
+            notice.createEl("strong", { text: this.translate("conflict.noTextDiff") });
             notice.createEl("div", {
-                text: "The remote SHA changed, but the file content currently looks identical. You can accept either side."
+                text: this.translate("conflict.noTextDiffDesc")
             });
         }
 
@@ -269,8 +282,8 @@ class DiffConflictModal extends Modal {
 
     private renderCompareGrid() {
         this.compareGridEl.empty();
-        this.compareGridEl.createEl("div", { text: "Local", cls: "github-sync-compare-colhead is-local" });
-        this.compareGridEl.createEl("div", { text: "Remote", cls: "github-sync-compare-colhead is-remote" });
+        this.compareGridEl.createEl("div", { text: this.translate("conflict.local"), cls: "github-sync-compare-colhead is-local" });
+        this.compareGridEl.createEl("div", { text: this.translate("conflict.remote"), cls: "github-sync-compare-colhead is-remote" });
 
         const runs = this.showOnlyChanges ? buildVisibleRuns(this.diffRows) : [{ kind: "rows" as const, rows: this.diffRows.map((row, index) => ({ row, index })) }];
 
@@ -280,11 +293,11 @@ class DiffConflictModal extends Modal {
             if (run.kind === "collapsed") {
                 const collapsed = this.compareGridEl.createEl("button", {
                     cls: "github-sync-compare-collapsed",
-                    text: `Expand ${run.count} unchanged line${run.count !== 1 ? "s" : ""}`
+                    text: this.translate("conflict.expandUnchanged", { count: run.count })
                 });
                 collapsed.onclick = () => {
                     this.showOnlyChanges = false;
-                    this.modeLabelEl.setText("Showing full file");
+                    this.modeLabelEl.setText(this.translate("conflict.fullFile"));
                     this.renderCompareGrid();
                 };
                 return;
@@ -305,12 +318,12 @@ class DiffConflictModal extends Modal {
         toolbar.dataset.hunkId = String(hunkId);
 
         const title = toolbar.createEl("div", { cls: "github-sync-hunk-title" });
-        title.createEl("strong", { text: `Conflict Block ${hunkId + 1}` });
-        title.createEl("span", { text: `Current choice: ${this.resolutionChoices.get(hunkId)}` });
+        title.createEl("strong", { text: this.translate("conflict.block", { index: hunkId + 1 }) });
+        title.createEl("span", { text: this.translate("conflict.currentChoice", { choice: this.resolutionChoices.get(hunkId) ?? "local" }) });
 
         const buttons = toolbar.createEl("div", { cls: "github-sync-hunk-actions" });
-        const useLocalButton = buttons.createEl("button", { text: "Use Local" });
-        const useRemoteButton = buttons.createEl("button", { text: "Use Remote" });
+        const useLocalButton = buttons.createEl("button", { text: this.translate("conflict.useLocal") });
+        const useRemoteButton = buttons.createEl("button", { text: this.translate("conflict.useRemote") });
 
         useLocalButton.onclick = () => {
             this.setHunkChoice(hunkId, "local");
@@ -411,7 +424,7 @@ class DiffConflictModal extends Modal {
 
         const label = toolbar.querySelector(".github-sync-hunk-title span");
         if (label) {
-            label.textContent = `Current choice: ${choice}`;
+            label.textContent = this.translate("conflict.currentChoice", { choice });
         }
     }
 

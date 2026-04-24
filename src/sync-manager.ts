@@ -1,4 +1,4 @@
-import { App, TFile, normalizePath, Notice } from "obsidian";
+import { App, TFile, TFolder, normalizePath, Notice } from "obsidian";
 import { GitHubApiClient } from "./github-api";
 import { PluginSettings, SyncStatus, RemoteFileMeta } from "./types";
 import { MetadataStore } from "./metadata-store";
@@ -7,6 +7,8 @@ import { PathFilter } from "./path-filter";
 import { Logger } from "./logger";
 import { StatusBar } from "./status-bar";
 import { ConflictResolver } from "./conflict-resolver";
+import { EMPTY_DIR_PLACEHOLDER, isEmptyDirPlaceholderPath } from "./constants";
+import { t } from "./i18n";
 
 export class SyncManager {
     private app: App;
@@ -56,16 +58,20 @@ export class SyncManager {
         const pullResult = await this.pullRemoteChanges("manual sync");
 
         if (pullResult.conflictCount > 0) {
-            new Notice(`GitHub Sync: ${pullResult.conflictCount} conflict(s) found during pull. Resolve them before pushing.`);
+            new Notice(this.translate("sync.notice.pullConflicts", { count: pullResult.conflictCount }));
             return;
         }
 
         if (pullResult.errorCount > 0) {
-            new Notice(`GitHub Sync: Pull finished with ${pullResult.errorCount} error(s). Push skipped.`);
+            new Notice(this.translate("sync.notice.pullErrors", { count: pullResult.errorCount }));
             return;
         }
 
-        await this.pushOnShutdown();
+        await this.pushOnShutdown(true);
+    }
+
+    async mirrorNow(): Promise<void> {
+        await this.mirrorLocalToRemote();
     }
 
     private async pullRemoteChanges(trigger: "initial pull" | "manual sync"): Promise<{
@@ -89,7 +95,14 @@ export class SyncManager {
 
         try {
             const remoteFiles = await this.githubApi.listFiles(this.settings.repoPath);
-            const syncFiles = remoteFiles.filter(file => this.pathFilter.shouldSync(file.path));
+            await this.ensureLocalEmptyFoldersFromRemote(
+                remoteFiles
+                    .filter(file => isEmptyDirPlaceholderPath(file.path))
+                    .map(file => file.path)
+            );
+            const syncFiles = remoteFiles.filter(file =>
+                !isEmptyDirPlaceholderPath(file.path) && this.pathFilter.shouldSync(file.path)
+            );
 
             const remotePaths = new Set(syncFiles.map(f => f.path));
             const totalFiles = syncFiles.length;
@@ -106,7 +119,7 @@ export class SyncManager {
                 else if (result === 'error') errorCount++;
             }
 
-            const deletedPaths = this.cleanupLocalFiles(remotePaths);
+            const deletedPaths = await this.cleanupLocalFiles(remotePaths);
             for (const path of deletedPaths) {
                 this.logger.info(`Removing local file ${path} that no longer exists on remote`);
                 deletedCount++;
@@ -129,7 +142,7 @@ export class SyncManager {
         } catch (error: any) {
             this.statusBar.setStatus("error");
             this.logger.error(`Failed during ${trigger}`, error);
-            new Notice(`GitHub Sync: Pull failed - ${error.message}`);
+            new Notice(this.translate("sync.notice.pullFailed", { message: error.message }));
 
             if (this.settings.enableSyncHistory) {
                 this.historyStore.addEntry(
@@ -167,6 +180,19 @@ export class SyncManager {
                     this.logger.info(`Updating local file ${localPath}`);
                     await this.updateLocalFile(localFile, remoteContent.contentBase64);
                 } else {
+                    const localContentBase64 = this.arrayBufferToBase64(await this.app.vault.readBinary(localFile));
+                    if (this.isEquivalentBase64(localContentBase64, remoteContent.contentBase64)) {
+                        this.logger.info(`Skipping false conflict for ${localPath}; local and remote content are identical`);
+                        this.metadataStore.updateSha(remoteFile.path, remoteFile.sha);
+                        if (localPath.endsWith(".md")) {
+                            this.metadataStore.updateBaseText(remoteFile.path, this.base64ToUtf8String(remoteContent.contentBase64));
+                        }
+                        this.dirtyFiles.delete(localPath);
+                        this.conflictedFiles.delete(localPath);
+                        this.failedFiles.delete(localPath);
+                        return 'success';
+                    }
+
                     this.logger.warn(`Conflict detected for ${localPath}`);
                     const localContent = await this.app.vault.read(localFile);
                     const remoteContentStr = this.base64ToUtf8String(remoteContent.contentBase64);
@@ -217,8 +243,8 @@ export class SyncManager {
         }
     }
 
-    async pushOnShutdown(): Promise<void> {
-        if (this.isPushing || this.dirtyFiles.size === 0) return;
+    async pushOnShutdown(includeEmptyFolders = false): Promise<void> {
+        if (this.isPushing || (this.dirtyFiles.size === 0 && !includeEmptyFolders)) return;
         this.isPushing = true;
         this.statusBar.setStatus("pushing");
         this.logger.info(`Starting push of ${this.dirtyFiles.size} dirty files...`);
@@ -229,6 +255,8 @@ export class SyncManager {
         let conflictCount = 0;
         let errorCount = 0;
         const successfullyPushedFiles: string[] = [];
+        let mirroredEmptyFolderCount = 0;
+        let removedEmptyFolderCount = 0;
 
         try {
             for (const localPath of Array.from(this.dirtyFiles)) {
@@ -247,20 +275,32 @@ export class SyncManager {
                 this.dirtyFiles.delete(localPath);
             }
 
+            if (includeEmptyFolders) {
+                const emptyFolderSyncResult = await this.syncEmptyFolderPlaceholders();
+                mirroredEmptyFolderCount = emptyFolderSyncResult.uploadedCount;
+                removedEmptyFolderCount = emptyFolderSyncResult.deletedCount;
+                errorCount += emptyFolderSyncResult.errorCount;
+            }
+
             await this.metadataStore.save();
             this.statusBar.setStatus(conflictCount > 0 ? "conflict" : errorCount > 0 ? "error" : "success");
-            this.logger.info(`Push completed: ${successCount} pushed, ${conflictCount} conflicts, ${errorCount} errors, ${this.dirtyFiles.size} pending`);
+            this.logger.info(
+                `Push completed: ${successCount} pushed, ${mirroredEmptyFolderCount} empty folders mirrored, ${removedEmptyFolderCount} empty folders removed, ${conflictCount} conflicts, ${errorCount} errors, ${this.dirtyFiles.size} pending`
+            );
 
             if (this.settings.enableSyncHistory) {
                 this.historyStore.addEntry(
                     operationType,
                     errorCount > 0 ? (conflictCount > 0 ? 'conflict' : 'error') : 'success',
-                    `Push completed: ${successCount} files pushed, ${conflictCount} conflicts, ${errorCount} errors, ${this.dirtyFiles.size} still pending`
+                    `Push completed: ${successCount} files pushed, ${mirroredEmptyFolderCount} empty folders mirrored, ${removedEmptyFolderCount} empty folders removed, ${conflictCount} conflicts, ${errorCount} errors, ${this.dirtyFiles.size} still pending`
                 );
             }
 
             if (conflictCount > 0 || errorCount > 0) {
-                new Notice(`GitHub Sync: ${successCount} pushed, ${this.dirtyFiles.size} file(s) still pending`);
+                new Notice(this.translate("sync.notice.pending", {
+                    success: successCount,
+                    pending: this.dirtyFiles.size
+                }));
             }
         } catch (error: any) {
             this.statusBar.setStatus("error");
@@ -302,10 +342,21 @@ export class SyncManager {
             
             if (currentRemoteSha && currentRemoteSha !== lastKnownSha) {
                 this.logger.warn(`Remote change detected for ${remotePath}. Aborting push to avoid overwrite.`);
+                const remoteFile = await this.githubApi.getFile(remotePath);
+                if (this.isEquivalentBase64(contentBase64, remoteFile.contentBase64)) {
+                    this.logger.info(`Skipping false conflict for ${remotePath}; local and remote content are identical`);
+                    this.metadataStore.updateSha(remotePath, currentRemoteSha);
+                    if (localPath.endsWith(".md")) {
+                        this.metadataStore.updateBaseText(remotePath, this.base64ToUtf8String(remoteFile.contentBase64));
+                    }
+                    this.conflictedFiles.delete(localPath);
+                    this.failedFiles.delete(localPath);
+                    return 'success';
+                }
+
                 this.statusBar.setStatus("conflict");
                 
                 const localContent = await this.app.vault.read(localFile);
-                const remoteFile = await this.githubApi.getFile(remotePath);
                 const remoteContent = this.base64ToUtf8String(remoteFile.contentBase64);
                 
                 await this.conflictResolver.resolvePushConflict({
@@ -372,6 +423,177 @@ export class SyncManager {
                 );
             }
             return 'error';
+        }
+    }
+
+    private async mirrorLocalToRemote(): Promise<void> {
+        if (this.isPushing || this.isPulling) {
+            new Notice(this.translate("sync.notice.busy"));
+            return;
+        }
+
+        this.isPushing = true;
+        this.statusBar.setStatus("pushing");
+        this.logger.info("Starting manual mirror sync (local -> remote)...");
+
+        let uploadedCount = 0;
+        let deletedCount = 0;
+        let errorCount = 0;
+        let emptyFolderCount = 0;
+
+        try {
+            const localFiles = this.app.vault.getFiles().filter(file => this.pathFilter.shouldSync(file.path));
+            const remoteFiles = await this.githubApi.listFiles(this.settings.repoPath);
+            const emptyFolderRemotePaths = this.collectLocalEmptyFolderRemotePaths();
+
+            const localByRemotePath = new Map<string, TFile>();
+            const desiredRemotePaths = new Set<string>(emptyFolderRemotePaths);
+            for (const file of localFiles) {
+                const remotePath = this.mapToRemotePath(file.path);
+                localByRemotePath.set(remotePath, file);
+                desiredRemotePaths.add(remotePath);
+            }
+
+            for (const [remotePath, localFile] of localByRemotePath) {
+                const result = await this.upsertMirrorFile(localFile, remotePath);
+                if (result === "success") {
+                    uploadedCount++;
+                    this.dirtyFiles.delete(localFile.path);
+                } else {
+                    errorCount++;
+                    this.failedFiles.add(localFile.path);
+                }
+            }
+
+            for (const remotePath of emptyFolderRemotePaths) {
+                const result = await this.upsertPlaceholderFile(remotePath);
+                if (result === "success") {
+                    emptyFolderCount++;
+                } else {
+                    errorCount++;
+                }
+            }
+
+            for (const remoteFile of remoteFiles) {
+                if (!isEmptyDirPlaceholderPath(remoteFile.path) && !this.pathFilter.shouldSync(remoteFile.path)) {
+                    continue;
+                }
+
+                if (desiredRemotePaths.has(remoteFile.path)) {
+                    continue;
+                }
+
+                const result = await this.deleteRemoteFileByPath(remoteFile.path);
+                if (result === "success") {
+                    deletedCount++;
+                } else {
+                    errorCount++;
+                }
+            }
+
+            this.metadataStore.updateLastSyncTime();
+            await this.metadataStore.save();
+            this.statusBar.setStatus(errorCount > 0 ? "error" : "success");
+
+            const summary = `Mirror sync completed: ${uploadedCount} uploaded, ${emptyFolderCount} empty folders mirrored, ${deletedCount} deleted, ${errorCount} errors`;
+            this.logger.info(summary);
+
+            if (this.settings.enableSyncHistory) {
+                this.historyStore.addEntry(
+                    "push",
+                    errorCount > 0 ? "error" : "success",
+                    summary
+                );
+            }
+
+            if (errorCount > 0) {
+                new Notice(this.translate("sync.notice.mirrorErrors", { count: errorCount }));
+            }
+        } catch (error: any) {
+            this.statusBar.setStatus("error");
+            this.logger.error("Failed during manual mirror sync", error);
+            if (this.settings.enableSyncHistory) {
+                this.historyStore.addEntry("push", "error", `Mirror sync failed: ${error.message}`, undefined, error.message);
+            }
+            throw error;
+        } finally {
+            this.isPushing = false;
+        }
+    }
+
+    private async upsertMirrorFile(localFile: TFile, remotePath: string): Promise<'success' | 'error'> {
+        try {
+            const currentRemoteSha = await this.githubApi.getFileSha(remotePath);
+            const content = await this.app.vault.readBinary(localFile);
+            const contentBase64 = this.arrayBufferToBase64(content);
+
+            await this.githubApi.createOrUpdateFile({
+                path: remotePath,
+                contentBase64,
+                message: `Mirror ${localFile.name} from Obsidian`,
+                sha: currentRemoteSha || undefined
+            });
+
+            const newSha = await this.githubApi.getFileSha(remotePath);
+            if (newSha) {
+                this.metadataStore.updateSha(remotePath, newSha);
+            }
+            if (localFile.path.endsWith(".md")) {
+                const text = await this.app.vault.read(localFile);
+                this.metadataStore.updateBaseText(remotePath, text);
+            }
+            this.conflictedFiles.delete(localFile.path);
+            this.failedFiles.delete(localFile.path);
+            return "success";
+        } catch (error: any) {
+            this.logger.error(`Failed to mirror file ${localFile.path}`, error);
+            return "error";
+        }
+    }
+
+    private async upsertPlaceholderFile(remotePath: string): Promise<'success' | 'error'> {
+        try {
+            const currentRemoteSha = await this.githubApi.getFileSha(remotePath);
+            const contentBase64 = btoa("This file preserves an empty folder for obsidian-github-sync.\n");
+
+            await this.githubApi.createOrUpdateFile({
+                path: remotePath,
+                contentBase64,
+                message: `Preserve empty folder ${remotePath}`,
+                sha: currentRemoteSha || undefined
+            });
+
+            const newSha = await this.githubApi.getFileSha(remotePath);
+            if (newSha) {
+                this.metadataStore.updateSha(remotePath, newSha);
+            }
+
+            return "success";
+        } catch (error: any) {
+            this.logger.error(`Failed to mirror empty folder placeholder ${remotePath}`, error);
+            return "error";
+        }
+    }
+
+    private async deleteRemoteFileByPath(remotePath: string): Promise<'success' | 'error'> {
+        try {
+            const currentRemoteSha = await this.githubApi.getFileSha(remotePath);
+            if (!currentRemoteSha) {
+                this.metadataStore.removeSha(remotePath);
+                return "success";
+            }
+
+            await this.githubApi.deleteFile({
+                path: remotePath,
+                message: `Mirror delete ${remotePath} from Obsidian`,
+                sha: currentRemoteSha
+            });
+
+            this.metadataStore.removeSha(remotePath);
+            return "success";
+        } catch (error: any) {
+            this.logger.error(`Failed to delete remote file ${remotePath} during mirror sync`, error);
+            return "error";
         }
     }
 
@@ -518,19 +740,19 @@ export class SyncManager {
         }
     }
 
-    private cleanupLocalFiles(remotePaths: Set<string>): string[] {
+    private async cleanupLocalFiles(remotePaths: Set<string>): Promise<string[]> {
         const deletedPaths: string[] = [];
         const existingRemoteShas = this.metadataStore.getAllShaEntries();
 
         for (const [remotePath, _sha] of existingRemoteShas) {
-            if (!remotePaths.has(remotePath) && this.pathFilter.shouldSync(remotePath)) {
+            if (!remotePaths.has(remotePath) && !isEmptyDirPlaceholderPath(remotePath) && this.pathFilter.shouldSync(remotePath)) {
                 const localPath = this.mapToLocalPath(remotePath);
                 const localFile = this.app.vault.getAbstractFileByPath(localPath);
 
                 if (localFile instanceof TFile) {
                     try {
                         this.internalWritePaths.add(localPath);
-                        this.app.vault.delete(localFile);
+                        await this.app.vault.delete(localFile);
                         this.internalWritePaths.delete(localPath);
                         this.metadataStore.removeSha(remotePath);
                         deletedPaths.push(localPath);
@@ -553,6 +775,48 @@ export class SyncManager {
         return deletedPaths;
     }
 
+    private async syncEmptyFolderPlaceholders(): Promise<{ uploadedCount: number; deletedCount: number; errorCount: number }> {
+        const remoteFiles = await this.githubApi.listFiles(this.settings.repoPath);
+        const desiredRemotePaths = new Set(this.collectLocalEmptyFolderRemotePaths());
+        const existingPlaceholderPaths = new Set(
+            remoteFiles
+                .filter(file => isEmptyDirPlaceholderPath(file.path))
+                .map(file => file.path)
+        );
+
+        let uploadedCount = 0;
+        let deletedCount = 0;
+        let errorCount = 0;
+
+        for (const remotePath of desiredRemotePaths) {
+            if (existingPlaceholderPaths.has(remotePath)) {
+                continue;
+            }
+
+            const result = await this.upsertPlaceholderFile(remotePath);
+            if (result === "success") {
+                uploadedCount++;
+            } else {
+                errorCount++;
+            }
+        }
+
+        for (const remotePath of existingPlaceholderPaths) {
+            if (desiredRemotePaths.has(remotePath)) {
+                continue;
+            }
+
+            const result = await this.deleteRemoteFileByPath(remotePath);
+            if (result === "success") {
+                deletedCount++;
+            } else {
+                errorCount++;
+            }
+        }
+
+        return { uploadedCount, deletedCount, errorCount };
+    }
+
     private mapToLocalPath(remotePath: string): string {
         const relative = remotePath.substring(this.settings.repoPath.length).replace(/^\//, "");
         return normalizePath(this.settings.vaultSubPath + "/" + relative);
@@ -561,6 +825,95 @@ export class SyncManager {
     private mapToRemotePath(localPath: string): string {
         const relative = localPath.substring(this.settings.vaultSubPath.length).replace(/^\//, "");
         return (this.settings.repoPath + "/" + relative).replace(/^\//, "");
+    }
+
+    private collectLocalEmptyFolderRemotePaths(): string[] {
+        const syncRootPath = normalizePath(this.settings.vaultSubPath || "");
+        const rootFolder = syncRootPath === ""
+            ? this.app.vault.getRoot()
+            : this.app.vault.getAbstractFileByPath(syncRootPath);
+
+        if (!(rootFolder instanceof TFolder)) {
+            return [];
+        }
+
+        const allLoadedFiles = this.app.vault.getAllLoadedFiles();
+        const byPath = new Map(allLoadedFiles.map((file) => [file.path, file]));
+        const childrenByParent = new Map<string, string[]>();
+
+        allLoadedFiles.forEach((file) => {
+            if (file.path === "") {
+                return;
+            }
+
+            const parentPath = file.parent?.path ?? "";
+            const siblings = childrenByParent.get(parentPath) ?? [];
+            siblings.push(file.path);
+            childrenByParent.set(parentPath, siblings);
+        });
+
+        const placeholderPaths: string[] = [];
+
+        const visitFolder = (folder: TFolder): boolean => {
+            let represented = false;
+            const childPaths = childrenByParent.get(folder.path) ?? [];
+
+            for (const childPath of childPaths) {
+                const child = byPath.get(childPath);
+                if (!child) {
+                    continue;
+                }
+
+                if (child instanceof TFile) {
+                    if (this.pathFilter.shouldSync(child.path)) {
+                        represented = true;
+                    }
+                    continue;
+                }
+
+                if (child instanceof TFolder && visitFolder(child)) {
+                    represented = true;
+                }
+            }
+
+            if (!represented && folder.path !== syncRootPath) {
+                placeholderPaths.push(normalizePath(`${this.mapToRemotePath(folder.path)}/${EMPTY_DIR_PLACEHOLDER}`));
+                return true;
+            }
+
+            return represented;
+        };
+
+        visitFolder(rootFolder);
+        return placeholderPaths;
+    }
+
+    private async ensureLocalEmptyFoldersFromRemote(remotePlaceholderPaths: string[]): Promise<void> {
+        for (const remotePath of remotePlaceholderPaths) {
+            const localFolderPath = this.mapPlaceholderToLocalFolder(remotePath);
+            if (!localFolderPath || this.app.vault.getAbstractFileByPath(localFolderPath)) {
+                continue;
+            }
+
+            this.internalWritePaths.add(localFolderPath);
+            try {
+                await this.app.vault.createFolder(localFolderPath);
+            } finally {
+                this.internalWritePaths.delete(localFolderPath);
+            }
+        }
+    }
+
+    private mapPlaceholderToLocalFolder(remotePlaceholderPath: string): string {
+        const suffix = `/${EMPTY_DIR_PLACEHOLDER}`;
+        const remoteFolderPath = remotePlaceholderPath.endsWith(suffix)
+            ? remotePlaceholderPath.slice(0, -suffix.length)
+            : "";
+        return this.mapToLocalPath(remoteFolderPath);
+    }
+
+    private translate(key: Parameters<typeof t>[1], vars?: Record<string, string | number>): string {
+        return t(this.settings, key, vars);
     }
 
     private async createLocalFile(path: string, contentBase64: string) {
@@ -606,5 +959,9 @@ export class SyncManager {
     private base64ToUtf8String(base64: string): string {
         const buffer = this.base64ToArrayBuffer(base64);
         return new TextDecoder("utf-8").decode(new Uint8Array(buffer));
+    }
+
+    private isEquivalentBase64(leftBase64: string, rightBase64: string): boolean {
+        return leftBase64.replace(/\s/g, "") === rightBase64.replace(/\s/g, "");
     }
 }
